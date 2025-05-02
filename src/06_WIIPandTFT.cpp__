@@ -13,6 +13,66 @@
 #include <math.h>
 #define TLE_UPDATE_INTERVAL_HOURS 10
 
+
+
+
+// ##################################################################################################
+#include <TFT_eSPI.h>
+#include <TFT_eWidget.h>
+
+TFT_eSPI tft = TFT_eSPI();
+
+const int SCREEN_WIDTH = 480;
+const int SCREEN_HEIGHT = 320;
+
+const int buttonSize = 40;
+const int topMargin = 12;
+const int marginR = 10;
+const int textMargin = 10;
+const int verticalGap = 13;
+const int labelYOffset = 14; // manual vertical fine-tuning
+
+const int buttonCount = 6;
+ButtonWidget *radioButtons[buttonCount];
+int selectedIndex = -1;
+bool touchWasHeld = false;
+
+int labelY[buttonCount];
+
+unsigned long lastUpdate = 0;
+const unsigned long updateInterval = 2000;
+//XXXXXXXXXXXXXXXXXXXXXXXXXXX
+
+bool namePrinted[6] = {false};
+char previousAzEl[6][32] = {""};
+char previousTimeStr[6][8] = {""};
+static bool wasVisible[6] = {false};
+
+//XXXXXXXXXXXXXXXXXXXXXXXXXXX
+
+
+
+
+void drawRadioButton(int i, bool selected)
+{
+    radioButtons[i]->drawSmoothButton(selected, 2, TFT_BLACK);
+}
+
+
+
+void selectRadio(int index)
+{
+    if (index == selectedIndex)
+        return;
+    if (selectedIndex >= 0)
+        drawRadioButton(selectedIndex, false);
+    selectedIndex = index;
+    drawRadioButton(selectedIndex, true);
+    Serial.printf("Selected: Satellite %d\n", index + 1);
+}
+
+// ##################################################################################################
+
 WiFiUDP ntpUDP;
 NTPClient timeClient(ntpUDP, "pool.ntp.org", 0, 60000);
 Preferences preferences;
@@ -27,8 +87,8 @@ const int numSatellitesToTrack = sizeof(satellitesToTrack) / sizeof(satellitesTo
 int trackedSatIndex = 4;
 float previousDist[numSatellitesToTrack] = {0};
 unsigned long previousTime[numSatellitesToTrack] = {0};
-float azAtAOS; // 📡 Azimuth at AOS
-float azAtLOS; // 📡 Azimuth at LOS
+float azAtAOS;                 // 📡 Azimuth at AOS
+float azAtLOS;                 // 📡 Azimuth at LOS
 String trackingTarget = "ISS"; // default target to track, could be "sun", "moon", or satellite name
 bool trackingEnabled = true;
 
@@ -136,7 +196,8 @@ struct SunMoonStruct
 };
 SunMoonStruct SunMoonInfo;
 
-struct SatelliteInfo {
+struct SatelliteInfo
+{
     char name[32];
     float azimuth, elevation, distance;
     float frequencyMHz;
@@ -144,14 +205,13 @@ struct SatelliteInfo {
     float dopplerHz;
     double aosUTC, tcaUTC, losUTC;
     float maxElevation;
-    float azAtAOS;   // 📡 Azimuth when satellite appears (AOS)
-    float azAtLOS;   // 📡 Azimuth when satellite disappears (LOS)
-    String passDuration;   // ⏱️ Duration in MM:SS
-    String timeToEvent;    // ⏳ Time until AOS or LOS in HH:MM
+    float azAtAOS;       // 📡 Azimuth when satellite appears (AOS)
+    float azAtLOS;       // 📡 Azimuth when satellite disappears (LOS)
+    String passDuration; // ⏱️ Duration in MM:SS
+    String timeToEvent;  // ⏳ Time until AOS or LOS in HH:MM
 };
 
-SatelliteInfo TrackedSatInfo[numSatellitesToTrack];  // Updated every second
-
+SatelliteInfo TrackedSatInfo[numSatellitesToTrack]; // Updated every second
 
 String StringFormat(const char *fmt, ...)
 {
@@ -163,17 +223,13 @@ String StringFormat(const char *fmt, ...)
     return String(buf);
 }
 
-
-
-
-String formatTimeStampFromJD(double jd, int tzHoursOffset = 0) {
+String formatTimeStampFromJD(double jd, int tzHoursOffset = 0)
+{
     int y, m, d, h, min;
     double sec;
     invjday(jd, tzHoursOffset, false, y, m, d, h, min, sec);
     return formatTimeStamp(d, m, y, h, min);
 }
-
-
 
 double jdToHour(double jd)
 {
@@ -793,9 +849,6 @@ void checkAndRefreshTLEsIfNeeded()
     }
 }
 
-
-
-
 /**
  * 📥 downloadTLEsAndStore()
  *
@@ -905,7 +958,7 @@ String formatDurationHHMM(double seconds)
 String formatTimeStamp(int d, int m, int y, int h, int min)
 {
     char buffer[20];
-    //snprintf(buffer, sizeof(buffer), "%02d/%02d/%04d %02d:%02d", d, m, y, h, min);
+    // snprintf(buffer, sizeof(buffer), "%02d/%02d/%04d %02d:%02d", d, m, y, h, min);
     snprintf(buffer, sizeof(buffer), "%02d.%02d %02d:%02d", d, m, h, min);
 
     return String(buffer);
@@ -1025,9 +1078,9 @@ bool predictNextPass(int catalogNumber)
     TrackedSatInfo[satIndex].passDuration = duration;
     TrackedSatInfo[satIndex].timeToEvent = timeToEvent;
     TrackedSatInfo[satIndex].aosUTC = pass.jdstart;
-TrackedSatInfo[satIndex].tcaUTC = pass.jdmax;
-TrackedSatInfo[satIndex].losUTC = pass.jdstop;
-TrackedSatInfo[satIndex].maxElevation = pass.maxelevation;
+    TrackedSatInfo[satIndex].tcaUTC = pass.jdmax;
+    TrackedSatInfo[satIndex].losUTC = pass.jdstop;
+    TrackedSatInfo[satIndex].maxElevation = pass.maxelevation;
 
     // Step 7: Print results
     Serial.println();
@@ -1213,18 +1266,140 @@ void trackConfiguredSatellites()
 
     Serial.println("🔄 Tracking all configured satellites...");
 
-    
     for (int i = 0; i < numSatellitesToTrack; ++i)
     {
         bool shouldBroadcast = false;
-        if (trackingTarget == String(TrackedSatInfo[i].name)) {
-            if (trackingEnabled==true) {
-            shouldBroadcast = true; }
+        if (trackingTarget == String(TrackedSatInfo[i].name))
+        {
+            if (trackingEnabled == true)
+            {
+                shouldBroadcast = true;
+            }
         }
         loadAndTrackSatelliteByCatalogNumber(satellitesToTrack[i], shouldBroadcast);
-    }
 
-    if (trackingEnabled && trackingTarget == "sun") {
+        // XXXXXXXXXXXXXXXXXXX
+
+
+
+        if (i < 6) {
+            char newAzEl[32];
+            snprintf(newAzEl, sizeof(newAzEl), "Az:%6.1f El:%+5.1f", sat.satAz, sat.satEl);
+            String timeStr = TrackedSatInfo[i].timeToEvent; // Example: "12:34"
+        
+            tft.setFreeFont(&FreeMonoBold12pt7b);
+            int y = i * 55;
+            int azelY = y + 40;
+            int xStart = 10;
+        
+            // 🌟 1) Print SATELLITE NAME only once
+            if (!namePrinted[i]) {
+                char paddedName[31];
+                snprintf(paddedName, sizeof(paddedName), "%-30s", sat.satName);
+        
+                tft.setTextColor(TFT_GOLD, TFT_NAVY);
+                tft.drawString(paddedName, xStart, y);
+                namePrinted[i] = true;
+            }
+        
+            // 🌟 2) SMART Az/El and Time
+            static bool wasVisible[6] = {false};
+        
+            bool nowVisible = (sat.satEl > 0);
+            bool redrawFullLine = (nowVisible != wasVisible[i]);
+        
+            if (redrawFullLine) {
+                // 🚨 Only if visibility changed: erase whole Az/El + Time
+                tft.fillRect(xStart, azelY, 460, 20, TFT_BLACK);
+        
+                // Redraw everything from zero
+                if (nowVisible)
+                    tft.setTextColor(TFT_GREEN, TFT_BLACK);
+                else
+                    tft.setTextColor(TFT_RED, TFT_BLACK);
+        
+                tft.setCursor(xStart, azelY);
+                tft.print(newAzEl);
+                strncpy(previousAzEl[i], newAzEl, sizeof(previousAzEl[i]));
+                previousAzEl[i][sizeof(previousAzEl[i]) - 1] = '\0';
+        
+                int timeX = xStart + strlen(newAzEl) * 14 + 3 * 14;
+                tft.setTextColor(TFT_WHITE, TFT_BLACK);
+                tft.setCursor(timeX, azelY);
+                tft.print(timeStr);
+                strncpy(previousTimeStr[i], timeStr.c_str(), sizeof(previousTimeStr[i]));
+                previousTimeStr[i][sizeof(previousTimeStr[i]) - 1] = '\0';
+        
+                wasVisible[i] = nowVisible;
+            }
+            else {
+                // 🚀 Normal per-character Az/El update
+                for (int c = 0; c < strlen(newAzEl); c++) {
+                    if (newAzEl[c] != previousAzEl[i][c]) {
+                        // Erase old char
+                        tft.setTextColor(TFT_BLACK, TFT_BLACK);
+                        tft.setCursor(xStart + c * 14, azelY);
+                        tft.print(previousAzEl[i][c]);
+        
+                        // Draw new char
+                        if (sat.satEl > 0)
+                            tft.setTextColor(TFT_GREEN, TFT_BLACK);
+                        else
+                            tft.setTextColor(TFT_RED, TFT_BLACK);
+        
+                        tft.setCursor(xStart + c * 14, azelY);
+                        tft.print(newAzEl[c]);
+        
+                        previousAzEl[i][c] = newAzEl[c];
+                    }
+                }
+        
+                // 🚀 Smart per-character TIME update
+                int timeX = xStart + strlen(newAzEl) * 14 + 3 * 14;
+        
+                for (int c = 0; c < timeStr.length(); c++) {
+                    if (timeStr[c] != previousTimeStr[i][c]) {
+                        // Erase old time char
+                        tft.setTextColor(TFT_BLACK, TFT_BLACK);
+                        tft.setCursor(timeX + c * 14, azelY);
+                        tft.print(previousTimeStr[i][c]);
+        
+                        // Draw new time char (always white)
+                        tft.setTextColor(TFT_GREEN, TFT_BLACK);
+                        tft.setCursor(timeX + c * 14, azelY);
+                        tft.print(timeStr[c]);
+        
+                        previousTimeStr[i][c] = timeStr[c];
+                    }
+                }
+        
+                // Clear extra old chars if time string shrinks
+                int oldLen = strlen(previousTimeStr[i]);
+                int newLen = timeStr.length();
+                if (newLen < oldLen) {
+                    for (int c = newLen; c < oldLen; c++) {
+                        tft.setTextColor(TFT_BLACK, TFT_BLACK);
+                        tft.setCursor(timeX + c * 14, azelY);
+                        tft.print(previousTimeStr[i][c]);
+                    }
+                    previousTimeStr[i][newLen] = '\0';
+                }
+            }
+        }
+
+
+
+
+  // XXXXXXXXXXXXXXXXXXX
+
+
+}
+
+
+
+
+    if (trackingEnabled && trackingTarget == "sun")
+    {
         String msg = StringFormat(
             "{\"name\":\"Sun\",\"az\":%.1f,\"el\":%.1f}",
             SunMoonInfo.sunAzimuth,
@@ -1232,7 +1407,8 @@ void trackConfiguredSatellites()
         webSocket.broadcastTXT(msg);
         Serial.println("📤 WebSocket sent (Sun): " + msg);
     }
-    else if (trackingEnabled && trackingTarget == "moon") {
+    else if (trackingEnabled && trackingTarget == "moon")
+    {
         String msg = StringFormat(
             "{\"name\":\"Moon\",\"az\":%.1f,\"el\":%.1f}",
             SunMoonInfo.moonAzimuth,
@@ -1240,11 +1416,9 @@ void trackConfiguredSatellites()
         webSocket.broadcastTXT(msg);
         Serial.println("📤 WebSocket sent (Moon): " + msg);
     }
-    
 
     Serial.println("✅ Satellite tracking complete.");
 }
-
 
 void setup()
 {
@@ -1266,8 +1440,9 @@ void setup()
     loadTLEsIntoRAM();
 
     webSocket.begin();
-   
-    webSocket.onEvent([](uint8_t num, WStype_t type, uint8_t *payload, size_t length) {
+
+    webSocket.onEvent([](uint8_t num, WStype_t type, uint8_t *payload, size_t length)
+                      {
         if (type == WStype_CONNECTED) {
             Serial.printf("✅ WebSocket client [%u] connected\n", num);
         } 
@@ -1302,10 +1477,7 @@ void setup()
                     }
                 }
             }
-        }
-    });
-    
-
+        } });
 
     if (!SPIFFS.begin(true))
     {
@@ -1313,10 +1485,9 @@ void setup()
         return;
     }
 
-
-
     // 🌞🌕 Route to serve Sun/Moon JSON data
-    server.on("/sunmoon", HTTP_GET, [](AsyncWebServerRequest *request) {
+    server.on("/sunmoon", HTTP_GET, [](AsyncWebServerRequest *request)
+              {
         String json = "{";
     
         // ☀️ SUN
@@ -1336,21 +1507,19 @@ void setup()
         json += "\"moonSetLocal\":\"" + formatTimeLocal(SunMoonInfo.moonSetUTC) + "\"";
     
         json += "}";
-        request->send(200, "application/json", json);
-    });
-    
+        request->send(200, "application/json", json); });
 
-    server.on("/observer", HTTP_GET, [](AsyncWebServerRequest *request) {
+    server.on("/observer", HTTP_GET, [](AsyncWebServerRequest *request)
+              {
         String json = "{";
         json += "\"latitude\":" + String(OBSERVER_LATITUDE, 4) + ",";
         json += "\"longitude\":" + String(OBSERVER_LONGITUDE, 4);
         json += "}";
-        request->send(200, "application/json", json);
-    });
+        request->send(200, "application/json", json); });
     server.serveStatic("/favicon.ico", SPIFFS, "/favicon.ico");
 
     server.on("/satellites", HTTP_GET, [](AsyncWebServerRequest *request)
-    {
+              {
         String json = "[";
         for (int i = 0; i < numSatellitesToTrack; i++) {
             if (i > 0) json += ",";
@@ -1378,24 +1547,98 @@ void setup()
             json += "}";
         }
         json += "]";
-        request->send(200, "application/json", json);
-    });
-    
-
+        request->send(200, "application/json", json); });
 
     server.on("/", HTTP_GET, [](AsyncWebServerRequest *request)
               { request->send(SPIFFS, "/index.html", "text/html"); });
+
+
+              server.on("/trackedSatellite", HTTP_GET, [](AsyncWebServerRequest *request)
+              {
+                  String json;
+              
+                  if (!trackingEnabled || trackingTarget == "")
+                  {
+                      json = "{\"status\":\"not_tracking\"}";
+                  }
+                  else if (trackingTarget == "sun")
+                  {
+                      json = StringFormat(
+                          "{\"name\":\"Sun\",\"azimuth\":%.2f,\"elevation\":%.2f}",
+                          SunMoonInfo.sunAzimuth,
+                          SunMoonInfo.sunElevation);
+                  }
+                  else if (trackingTarget == "moon")
+                  {
+                      json = StringFormat(
+                          "{\"name\":\"Moon\",\"azimuth\":%.2f,\"elevation\":%.2f}",
+                          SunMoonInfo.moonAzimuth,
+                          SunMoonInfo.moonElevation);
+                  }
+                  else
+                  {
+                      bool found = false;
+                      for (int i = 0; i < numSatellitesToTrack; ++i)
+                      {
+                          if (trackingTarget == String(TrackedSatInfo[i].name))
+                          {
+                              found = true;
+                              json = StringFormat(
+                                  "{\"name\":\"%s\",\"azimuth\":%.2f,\"elevation\":%.2f}",
+                                  TrackedSatInfo[i].name,
+                                  TrackedSatInfo[i].azimuth,
+                                  TrackedSatInfo[i].elevation);
+                              break;
+                          }
+                      }
+              
+                      if (!found)
+                      {
+                          json = "{\"status\":\"satellite_not_found\"}";
+                      }
+                  }
+              
+                  request->send(200, "application/json", json);
+              });
+              
+
+
+
 
     server.begin(); // ✅ Start the Async Web Server
 
     Serial.println("🌐 Async Web server started!");
     Serial.print("📡 Connect your browser to: http://");
     Serial.println(WiFi.localIP());
-    delay(5000);
+    // ##################################################################################################
+
+    pinMode(TFT_BLP, OUTPUT);
+    digitalWrite(TFT_BLP, HIGH);
+
+    tft.begin();
+    tft.setRotation(1);
+    tft.fillScreen(TFT_BLACK);
+    tft.setFreeFont(&FreeMonoBold12pt7b);
+    
+      for (int i = 0; i < buttonCount; i++) {
+        int x = SCREEN_WIDTH - marginR - buttonSize;
+        int y = topMargin + i * (buttonSize + verticalGap);
+        labelY[i] = y;
+
+        radioButtons[i] = new ButtonWidget(&tft);
+        radioButtons[i]->initButtonUL(x, y, buttonSize, buttonSize,
+                                      TFT_WHITE, TFT_DARKGREY, TFT_WHITE,
+                                      "", 1);
+        drawRadioButton(i, false);
+  
+      }
+
+
+
+        
+
+    // delay(5000);
 }
-
-
-
 
 void loop()
 {
@@ -1405,29 +1648,26 @@ void loop()
     if (currentMillis - lastTrackTime > 900)
     {
         double az, el, rise, set;
-    
+
         // 🌞 SUN
         getSunAzElAndRiseSet(az, el, rise, set);
         SunMoonInfo.sunAzimuth = az;
         SunMoonInfo.sunElevation = el;
         SunMoonInfo.sunRiseUTC = rise;
         SunMoonInfo.sunSetUTC = set;
-    
+
         // 🌕 MOON
         getMoonAzElAndRiseSet(az, el, rise, set);
         SunMoonInfo.moonAzimuth = az;
         SunMoonInfo.moonElevation = el;
         SunMoonInfo.moonRiseUTC = rise;
         SunMoonInfo.moonSetUTC = set;
-    
+
         // 🛰️ Only now: do tracking & broadcast
         trackConfiguredSatellites();
-    
+
         lastTrackTime = currentMillis;
     }
-    
-
-
 
     if (millis() - lastNtpSync > 3600000)
     {

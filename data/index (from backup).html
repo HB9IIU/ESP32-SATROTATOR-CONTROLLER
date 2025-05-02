@@ -331,6 +331,7 @@
                         const observer = { lat: latitude, lng: longitude };
                         const target = computeTargetPoint(observer.lat, observer.lng, data.azi, 2);
                         directionLine.setPath([observer, target]);
+                        console.log(`🗺️ Updated direction line to azimuth ${data.azi.toFixed(1)}°`);
                     }
 
                     // Update displayed rotor values
@@ -380,41 +381,26 @@
             setTimeout(() => location.reload(), 2000);
         };
 
-
         document.body.addEventListener("change", (e) => {
             if (e.target.name === "trackingTarget") {
                 selectedTarget = e.target.value;
-                fetch("/track", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ target: selectedTarget })
-                }).then(res => {
-                    if (res.ok) {
-                        banner.innerHTML = `📡 Currently Tracking: ${selectedTarget}`;
-                        stopWrapper.classList.remove("hidden");
-                    }
-                });
+                if (websocket.readyState === WebSocket.OPEN) {
+                    websocket.send(JSON.stringify({ track: selectedTarget }));
+                }
+                banner.innerHTML = `📡 Currently Tracking: ${selectedTarget}`;
+                stopWrapper.classList.remove("hidden");
             }
         });
 
         document.getElementById("stopTrackingBtn").addEventListener("click", () => {
             selectedTarget = null;
             document.querySelectorAll('input[name="trackingTarget"]').forEach(r => r.checked = false);
-            fetch("/track", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ target: "" })
-            }).then(res => {
-                if (res.ok) {
-                    banner.innerHTML = "📡 Currently Tracking: --";
-                    stopWrapper.classList.add("hidden");
-                }
-            });
+            if (websocket.readyState === WebSocket.OPEN) {
+                websocket.send(JSON.stringify({ track: "" }));
+            }
+            banner.innerHTML = "📡 Currently Tracking: --";
+            stopWrapper.classList.add("hidden");
         });
-
-
-
-
 
         async function loadSunMoonData() {
             const res = await fetch("/sunmoon");
@@ -671,200 +657,154 @@
 
 
 
-    <script>
-        async function loadAndDrawPolarPlot() {
-            try {
-                const res = await fetch('/passpath');
-                const rawData = await res.json();
-
-                if (!Array.isArray(rawData) || rawData.length < 3) {
-                    console.warn("Not enough data points");
-                    return;
-                }
-
-                const polarData = rawData.map(p => [p.az, p.el]);
-
-                // AOS = first point, LOS = last point, TCA = middle
-                const aos = rawData[0];
-                const tca = rawData[Math.floor(rawData.length / 2)];
-                const los = rawData[rawData.length - 1];
-
-                const labeledPoints = [
-                    {
-                        x: aos.az,
-                        y: 95, // outside max ring (yAxis max is 90)
-                        name: 'AOS',
-                        dataLabels: {
-                            enabled: true,
-                            format: 'AOS',
-                            style: {
-                                color: '#ffffff',
-                                fontWeight: 'bold'
-                            },
-                            align: 'center',
-                            verticalAlign: 'middle'
-                        }
-                    },
-                    {
-                        x: tca.az,
-                        y: tca.el,
-                        name: 'TCA',
-                        dataLabels: {
-                            enabled: true,
-                            format: 'TCA',
-                            style: {
-                                color: '#ffffff',
-                                fontWeight: 'bold'
-                            },
-                            align: 'center',
-                            verticalAlign: 'middle'
-                        }
-                    },
-                    {
-                        x: los.az,
-                        y: 95,
-                        name: 'LOS',
-                        dataLabels: {
-                            enabled: true,
-                            format: 'LOS',
-                            style: {
-                                color: '#ffffff',
-                                fontWeight: 'bold'
-                            },
-                            align: 'center',
-                            verticalAlign: 'middle'
-                        }
-                    }
-                ];
-
-                Highcharts.chart('polarPlot', {
-                    chart: {
-                        polar: true,
-                        type: 'line',
-                        backgroundColor: '#0d1117'
-                    },
-                    title: {
-                        text: 'Satellite Pass',
-                        style: { color: '#f6cb3e' }
-                    },
-                    pane: {
-                        size: '100%'
-                    },
-                    xAxis: {
-                        tickInterval: 45,
-                        min: 0,
-                        max: 360,
-                        labels: {
-                            format: '{value}°',
-                            style: { color: '#c9d1d9' }
-                        }
-                    },
-                    yAxis: {
-                        min: 0,
-                        max: 90,
-                        reversed: true,
-                        tickInterval: 15,
-                        gridLineInterpolation: 'circle',
-                        labels: {
-                            format: '{value}°',
-                            style: { color: '#c9d1d9' }
-                        }
-                    },
-                    tooltip: {
-                        useHTML: true,
-                        formatter: function () {
-                            return `<b>${this.point.name || 'Point'}</b><br>Az: <b>${this.x.toFixed(1)}°</b><br>El: <b>${this.y.toFixed(1)}°</b>`;
-                        },
-                        backgroundColor: '#161b22',
-                        style: { color: '#f6cb3e' }
-                    },
-                    plotOptions: {
-                        series: {
-                            marker: { enabled: false },
-                            lineWidth: 3,
-                            enableMouseTracking: true
-                        }
-                    },
-                    series: [
-                        {
-                            name: 'Trajectory',
-                            data: polarData,
-                            color: '#f6cb3e',
-                            connectEnds: false,
-                            showInLegend: false
-                        },
-                        {
-                            type: 'scatter',
-                            data: labeledPoints,
-                            color: null,
-                            enableMouseTracking: false,
-                            showInLegend: false,
-                            marker: { enabled: false },
-                            lineWidth: 0
-                        }
-                    ],
-                    credits: { enabled: false },
-                    legend: { enabled: false }
-                });
-
-            } catch (err) {
-                console.error("Error plotting satellite pass:", err);
-            }
-        }
-
-        window.addEventListener('DOMContentLoaded', loadAndDrawPolarPlot);
-    </script>
 <script>
-    let map;
-    let directionLine;
-
-    function computeTargetPoint(lat, lng, azimuth, distanceKm) {
-        const R = 6371;
-        const rad = Math.PI / 180;
-        const deg = 180 / Math.PI;
-
-        const az = azimuth * rad;
-        const φ1 = lat * rad;
-        const λ1 = lng * rad;
-
-        const φ2 = Math.asin(Math.sin(φ1) * Math.cos(distanceKm / R) +
-            Math.cos(φ1) * Math.sin(distanceKm / R) * Math.cos(az));
-        const λ2 = λ1 + Math.atan2(Math.sin(az) * Math.sin(distanceKm / R) * Math.cos(φ1),
-            Math.cos(distanceKm / R) - Math.sin(φ1) * Math.sin(φ2));
-
-        return { lat: φ2 * deg, lng: λ2 * deg };
-    }
-
-    function initMap() {
-        const observer = { lat: latitude, lng: longitude };
-        map = new google.maps.Map(document.getElementById("map"), {
-            center: observer,
-            zoom: 17,
-            mapTypeId: "satellite",
-            disableDefaultUI: true
-        });
-
-        directionLine = new google.maps.Polyline({
-            path: [observer, observer],
-            geodesic: true,
-            strokeColor: "#f6cb3e",
-            strokeOpacity: 1.0,
-            strokeWeight: 2,
-            icons: [{
-                icon: {
-                    path: 'M 0,-1 0,1',
-                    strokeOpacity: 1,
-                    scale: 4
+    async function loadAndDrawPolarPlot() {
+        try {
+            const res = await fetch('/passpath');
+            const rawData = await res.json();
+    
+            if (!Array.isArray(rawData) || rawData.length < 3) {
+                console.warn("Not enough data points");
+                return;
+            }
+    
+            const polarData = rawData.map(p => [p.az, p.el]);
+    
+            // AOS = first point, LOS = last point, TCA = middle
+            const aos = rawData[0];
+            const tca = rawData[Math.floor(rawData.length / 2)];
+            const los = rawData[rawData.length - 1];
+    
+            const labeledPoints = [
+                {
+                    x: aos.az,
+                    y: 95, // outside max ring (yAxis max is 90)
+                    name: 'AOS',
+                    dataLabels: {
+                        enabled: true,
+                        format: 'AOS',
+                        style: {
+                            color: '#ffffff',
+                            fontWeight: 'bold'
+                        },
+                        align: 'center',
+                        verticalAlign: 'middle'
+                    }
                 },
-                offset: '0',
-                repeat: '20px'
-            }]
-        });
-
-        directionLine.setMap(map);
-        console.log("✅ Google Map initialized");
+                {
+                    x: tca.az,
+                    y: tca.el,
+                    name: 'TCA',
+                    dataLabels: {
+                        enabled: true,
+                        format: 'TCA',
+                        style: {
+                            color: '#ffffff',
+                            fontWeight: 'bold'
+                        },
+                        align: 'center',
+                        verticalAlign: 'middle'
+                    }
+                },
+                {
+                    x: los.az,
+                    y: 95,
+                    name: 'LOS',
+                    dataLabels: {
+                        enabled: true,
+                        format: 'LOS',
+                        style: {
+                            color: '#ffffff',
+                            fontWeight: 'bold'
+                        },
+                        align: 'center',
+                        verticalAlign: 'middle'
+                    }
+                }
+            ];
+    
+            Highcharts.chart('polarPlot', {
+                chart: {
+                    polar: true,
+                    type: 'line',
+                    backgroundColor: '#0d1117'
+                },
+                title: {
+                    text: 'Satellite Pass',
+                    style: { color: '#f6cb3e' }
+                },
+                pane: {
+                    size: '100%'
+                },
+                xAxis: {
+                    tickInterval: 45,
+                    min: 0,
+                    max: 360,
+                    labels: {
+                        format: '{value}°',
+                        style: { color: '#c9d1d9' }
+                    }
+                },
+                yAxis: {
+                    min: 0,
+                    max: 90,
+                    reversed: true,
+                    tickInterval: 15,
+                    gridLineInterpolation: 'circle',
+                    labels: {
+                        format: '{value}°',
+                        style: { color: '#c9d1d9' }
+                    }
+                },
+                tooltip: {
+                    useHTML: true,
+                    formatter: function () {
+                        return `<b>${this.point.name || 'Point'}</b><br>Az: <b>${this.x.toFixed(1)}°</b><br>El: <b>${this.y.toFixed(1)}°</b>`;
+                    },
+                    backgroundColor: '#161b22',
+                    style: { color: '#f6cb3e' }
+                },
+                plotOptions: {
+                    series: {
+                        marker: { enabled: false },
+                        lineWidth: 3,
+                        enableMouseTracking: true
+                    }
+                },
+                series: [
+                    {
+                        name: 'Trajectory',
+                        data: polarData,
+                        color: '#f6cb3e',
+                        connectEnds: false,
+                        showInLegend: false
+                    },
+                    {
+                        type: 'scatter',
+                        data: labeledPoints,
+                        color: null,
+                        enableMouseTracking: false,
+                        showInLegend: false,
+                        marker: { enabled: false },
+                        lineWidth: 0
+                    }
+                ],
+                credits: { enabled: false },
+                legend: { enabled: false }
+            });
+    
+        } catch (err) {
+            console.error("Error plotting satellite pass:", err);
+        }
     }
-</script>
+    
+    window.addEventListener('DOMContentLoaded', loadAndDrawPolarPlot);
+    </script>
+    
+
+
+
+
 
 
 
