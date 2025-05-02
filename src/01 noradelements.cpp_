@@ -1,0 +1,128 @@
+#include "myconfig.h"
+#include <Preferences.h>
+#include <WiFi.h>
+#include <HTTPClient.h>
+#include <time.h>
+
+
+Preferences preferences;
+
+void connectToWiFi() {
+  Serial.print("Connecting to Wi-Fi: ");
+  Serial.println(WIFI_SSID);
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+
+  Serial.println("\nConnected to Wi-Fi.");
+  Serial.print("IP Address: ");
+  Serial.println(WiFi.localIP());
+
+  // Sync system time with NTP
+  configTime(0, 0, "pool.ntp.org");
+  Serial.print("Waiting for NTP time");
+  while (time(nullptr) < 100000) {
+    Serial.print(".");
+    delay(500);
+  }
+  Serial.println("\nTime sync complete.");
+}
+
+void storeAllTLEs() {
+  preferences.begin("tle-storage", false);  // Open for write access
+
+  for (int i = 0; i < sizeof(satellites) / sizeof(Satellite); i++) {
+    int catNum = satellites[i].catalogNumber;
+
+    String url = "http://www.celestrak.org/NORAD/elements/gp.php?CATNR=" + String(catNum) + "&FORMAT=TLE";
+    Serial.println("Fetching: " + url);
+
+    HTTPClient http;
+    http.begin(url);
+    int code = http.GET();
+
+    if (code == 200) {
+      String payload = http.getString();
+
+      int firstNL = payload.indexOf('\n');
+      int secondNL = payload.indexOf('\n', firstNL + 1);
+
+      if (firstNL > 0 && secondNL > firstNL) {
+        String satName = payload.substring(0, firstNL); satName.trim();
+        String line1 = payload.substring(firstNL + 1, secondNL); line1.trim();
+        String line2 = payload.substring(secondNL + 1); line2.trim();
+
+        String baseKey = String(catNum);
+        preferences.putString((baseKey + "_name").c_str(), satName);
+        preferences.putString((baseKey + "_tle1").c_str(), line1);
+        preferences.putString((baseKey + "_tle2").c_str(), line2);
+
+        Serial.printf("Stored TLE for %s (CATNR %d)\n", satName.c_str(), catNum);
+      } else {
+        Serial.printf("Failed to parse TLE for CATNR %d\n", catNum);
+      }
+    } else {
+      Serial.printf("HTTP error %d for CATNR %d\n", code, catNum);
+    }
+
+    http.end();
+    delay(500);  // Prevent hammering server
+  }
+
+  preferences.putULong("last_update", time(nullptr));  // Save current time after all
+  preferences.end();
+}
+
+void retrieveTLE(int catalogNumber) {
+  preferences.begin("tle-storage", true);  // Open for read access
+
+  String baseKey = String(catalogNumber);
+  String name = preferences.getString((baseKey + "_name").c_str(), "");
+  String tle1 = preferences.getString((baseKey + "_tle1").c_str(), "");
+  String tle2 = preferences.getString((baseKey + "_tle2").c_str(), "");
+
+  if (name != "" && tle1 != "" && tle2 != "") {
+    Serial.println("Retrieved TLE from Flash:");
+    Serial.println(name);
+    Serial.println(tle1);
+    Serial.println(tle2);
+  } else {
+    Serial.println("No TLE found in flash for CATNR " + baseKey);
+  }
+
+  preferences.end();
+}
+
+void setup() {
+  Serial.begin(115200);
+  delay(4000);
+  connectToWiFi();
+
+  preferences.begin("tle-storage", true);
+  unsigned long lastUpdate = preferences.getULong("last_update", 0);
+  preferences.end();
+
+  unsigned long now = time(nullptr);
+  unsigned long interval = TLE_UPDATE_INTERVAL_HOURS * 3600;
+
+  unsigned long elapsed = now - lastUpdate;
+  unsigned int hours = elapsed / 3600;
+  unsigned int minutes = (elapsed % 3600) / 60;
+  unsigned int seconds = elapsed % 60;
+  
+  Serial.printf("Last update: %02u:%02u:%02u ago (HH:MM:SS)\n", hours, minutes, seconds);
+  if (lastUpdate == 0 || (now - lastUpdate) > interval) {
+    Serial.println("TLE update needed. Downloading...");
+    storeAllTLEs();
+  } else {
+    Serial.println("TLEs are recent. No update needed.");
+  }
+
+  // Example retrieval
+  retrieveTLE(25544);  // ISS
+}
+
+void loop() {}

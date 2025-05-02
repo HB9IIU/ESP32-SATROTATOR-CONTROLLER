@@ -1,0 +1,54 @@
+#include <WiFi.h>
+#include <ESPAsyncWebServer.h>
+#include <SPIFFS.h>
+
+const char *ssid = "MESH";
+const char *password = "Nestle2010Nestle";
+
+AsyncWebServer server(80);  // Async version
+
+void setup() {
+  Serial.begin(115200);
+  delay(1000);
+
+  WiFi.setHostname("ESP32test");
+  WiFi.begin(ssid, password);
+  Serial.println("Connecting to WiFi...");
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+
+  Serial.println("\n✅ Connected!");
+  Serial.print("IP Address: ");
+  Serial.println(WiFi.localIP());
+  Serial.println("Visit: http://" + WiFi.localIP().toString());
+
+  if (!SPIFFS.begin(true)) {
+    Serial.println("❌ SPIFFS Mount Failed");
+    return;
+  }
+
+  // Serve index.html
+  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send(SPIFFS, "/index.html", "text/html");
+  });
+
+  // Serve JSON data on /status
+  server.on("/status", HTTP_GET, [](AsyncWebServerRequest *request) {
+    String json = R"rawlite({
+      "satellite": "ISS",
+      "az": 123.4,
+      "el": 45.6
+    })rawlite";
+    request->send(200, "application/json", json);
+  });
+
+  server.begin();
+  Serial.println("🌐 Async web server started");
+}
+
+void loop() {
+  // No need to call handleClient() — AsyncWebServer handles it internally
+}
+

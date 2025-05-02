@@ -1,0 +1,56 @@
+#include <WiFi.h>
+#include <WebServer.h>
+#include <SPIFFS.h>
+
+WebServer server(80);
+
+const char *ssid = "MESH";
+const char *password = "Nestle2010Nestle";
+
+void handleStatus() {
+  // Simulated values
+  String json = R"rawlite({
+    "satellite": "ISS",
+    "az": 123.4,
+    "el": 45.6
+  })rawlite";
+
+  server.send(200, "application/json", json);
+}
+
+void setup() {
+  Serial.begin(115200);
+  delay(1000);
+
+  WiFi.setHostname("ESP32test");
+  WiFi.begin(ssid, password);
+  Serial.println("Connecting to WiFi...");
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+
+  Serial.println("\n✅ Connected!");
+  Serial.print("IP Address: ");
+  Serial.println(WiFi.localIP());
+  Serial.println("Visit: http://" + WiFi.localIP().toString());
+
+  if (!SPIFFS.begin(true)) {
+    Serial.println("❌ SPIFFS Mount Failed");
+    return;
+  }
+
+  server.on("/", HTTP_GET, []() {
+    File file = SPIFFS.open("/index.html", "r");
+    server.streamFile(file, "text/html");
+    file.close();
+  });
+
+  server.on("/status", HTTP_GET, handleStatus);
+  server.begin();
+  Serial.println("🌐 Web server started");
+}
+
+void loop() {
+  server.handleClient();
+}

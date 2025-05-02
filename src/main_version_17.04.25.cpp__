@@ -509,6 +509,8 @@ bool syncTimeFromNTP(bool displayOnTFT)
 
     delay(5000);  // Wait before trying again
     return false; // Indicate failure
+
+
 }
 void displayPExpedition72image()
 {

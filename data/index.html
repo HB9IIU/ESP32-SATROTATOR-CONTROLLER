@@ -1,0 +1,610 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Satellite Tracker</title>
+  <link rel="icon" type="image/x-icon" href="favicon.ico">
+  <script src="https://code.highcharts.com/highcharts.js"></script>
+  <script src="https://unpkg.com/suncalc@1.9.0/suncalc.js"></script>
+
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background-color: #0d1117;
+      color: #c9d1d9;
+      margin: 0;
+      padding: 1rem;
+    }
+
+    h1 {
+      text-align: center;
+      color: #f6cb3e;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 2rem;
+    }
+
+    th,
+    td {
+      padding: 0.5rem;
+      border-bottom: 1px solid #30363d;
+      text-align: center;
+    }
+
+    th {
+      background-color: #161b22;
+    }
+
+    td.left {
+      text-align: left;
+    }
+
+    .section {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 0.5rem;
+      align-items: stretch;
+      /* 🔥 KEY FIX */
+    }
+
+
+    .card {
+      background-color: #161b22;
+      padding: 0.5rem;
+      margin: 0.3rem;
+      border-radius: 0.4rem;
+      box-shadow: 0 0 6px rgba(0, 0, 0, 0.3);
+      min-width: 180px;
+      max-width: 100%;
+      flex: 1;
+    }
+
+    .label {
+      font-weight: bold;
+      color: #f6cb3e;
+      margin-bottom: 0.5rem;
+    }
+
+    .radio {
+      float: right;
+    }
+
+    .highlight {
+      background-color: #161b22;
+      margin-top: 1rem;
+      padding: 1rem;
+      font-size: 1.5rem;
+      text-align: center;
+      color: #f6cb3e;
+      border-radius: 0.5rem;
+      border: 2px solid #30363d;
+    }
+
+    .above-horizon {
+      color: #00ff88;
+      font-weight: bold;
+    }
+
+    .hidden {
+      display: none;
+    }
+
+    .header-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0 1rem;
+      margin-bottom: 2rem;
+    }
+
+    input[type="radio"] {
+      appearance: none;
+      -webkit-appearance: none;
+      width: 28px;
+      height: 28px;
+      border: 3px solid #f6cb3e;
+      border-radius: 50%;
+      background-color: transparent;
+      outline: none;
+      cursor: pointer;
+      margin: 0.5rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    input[type="radio"]::before {
+      content: "";
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background-color: transparent;
+      transition: background-color 0.2s ease;
+    }
+
+    input[type="radio"]:checked::before {
+      background-color: #f6cb3e;
+    }
+
+    #moonImage {
+      transform: rotate(180deg);
+      width: 195px;
+      height: 195px;
+      object-fit: cover;
+      border-radius: 0.5rem;
+      margin: auto;
+      /* optional: center in card */
+    }
+
+
+    .card.moon-image {
+      display: flex;
+      align-items: stretch;
+      justify-content: center;
+      padding: 0;
+      /* optional: remove inner padding if you want tight image fit */
+    }
+
+
+    .card.sun-chart {
+      display: flex;
+      align-items: center;
+      /* 🔥 This centers vertically */
+      justify-content: center;
+      /* optional: center horizontally */
+      padding: 0.5rem;
+      /* match other cards */
+    }
+
+
+
+
+
+    #sunChart {
+      height: 195px;
+      width: 100%;
+
+    }
+  </style>
+</head>
+
+<body>
+  <div id="headerTimeRow" class="header-row">
+    <div id="utcTime" style="flex: 1; text-align: left; font-size: 1.8rem; font-weight: normal;color: #f6cb3e;">UTC:
+      --:--:--</div>
+    <div style="flex: 1; text-align: center;">
+      <h1 style="margin: 0;">HB9IIU Rotator Controller</h1>
+    </div>
+    <div id="localTime" style="flex: 1; text-align: right; font-size: 1.8rem; font-weight: normal;color: #f6cb3e;">
+      Local: --:--:--</div>
+  </div>
+
+  <table id="satTable">
+    <thead>
+      <tr>
+        <th>Select</th>
+        <th>Name</th>
+        <th>Azimuth</th>
+        <th>Elevation</th>
+        <th>Freq (MHz)</th>
+        <th>Corrected Freq</th>
+        <th>AOS</th>
+        <th>TCA</th>
+        <th>LOS</th>
+        <th>Max El</th>
+        <th>Duration</th>
+        <th>Next Event</th>
+      </tr>
+    </thead>
+    <tbody id="satBody"></tbody>
+  </table>
+
+  <div class="section">
+    <!-- LEFT: SUN CHART -->
+    <div class="card sun-chart">
+
+      <div class="card">
+        <div id="sunChart"></div>
+      </div>
+    </div>
+    <!-- CENTER: SUN CARD -->
+    <div class="card">
+      <div class="radio"><input type="radio" name="trackingTarget" value="sun"></div>
+      <div class="label">🌞 Sun</div>
+      <table>
+        <tr>
+          <td>Azimuth:</td>
+          <td id="sunAz">--°</td>
+        </tr>
+        <tr>
+          <td>Elevation:</td>
+          <td id="sunEl">--°</td>
+        </tr>
+        <tr>
+          <td>Sunrise:</td>
+          <td id="sunrise">--:--</td>
+        </tr>
+        <tr>
+          <td>Sunset:</td>
+          <td id="sunset">--:--</td>
+        </tr>
+      </table>
+    </div>
+
+    <!-- RIGHT: MOON CARD -->
+    <div class="card">
+      <div class="radio"><input type="radio" name="trackingTarget" value="moon"></div>
+      <div class="label">🌕 Moon</div>
+      <table>
+        <tr>
+          <td>Azimuth:</td>
+          <td id="moonAz">--°</td>
+        </tr>
+        <tr>
+          <td>Elevation:</td>
+          <td id="moonEl">--°</td>
+        </tr>
+        <tr>
+          <td>Moonrise:</td>
+          <td id="moonrise">--:--</td>
+        </tr>
+        <tr>
+          <td>Moonset:</td>
+          <td id="moonset">--:--</td>
+        </tr>
+      </table>
+    </div>
+
+    <!-- FAR RIGHT: MOON IMAGE -->
+    <div class="card moon-image">
+      <img id="moonImage" src="" alt="NASA Moon of the Hour">
+    </div>
+  </div>
+
+  <div class="highlight" id="trackingBanner">📡 Currently Tracking: </div>
+
+  <div id="stopTrackingWrapper" class="hidden" style="text-align: center; margin-top: 1rem;">
+    <button id="stopTrackingBtn"
+      style="padding: 0.5rem 1rem; font-size: 1.1rem; background-color: #8b0000; color: white; border: none; border-radius: 5px; cursor: pointer;">
+      🚫 Stop Tracking
+    </button>
+  </div>
+
+  <script>
+    var latitude = 46.4668;
+     var       longitude = 6.8616;
+
+
+    let selectedTarget = null;
+    const banner = document.getElementById("trackingBanner");
+    const stopWrapper = document.getElementById("stopTrackingWrapper");
+
+    const websocket = new WebSocket("ws://" + location.hostname + ":81");
+
+    websocket.onopen = () => {
+      if (selectedTarget) websocket.send(JSON.stringify({ track: selectedTarget }));
+    };
+
+
+
+
+
+    websocket.onmessage = event => {
+      try {
+        const data = JSON.parse(event.data);
+        if (!data.name || data.az === undefined || data.el === undefined) return;
+
+        // Auto-select tracking if not yet set
+        if (!selectedTarget) {
+          selectedTarget = data.name;
+
+          const radioToCheck = document.querySelector(`input[name="trackingTarget"][value="${selectedTarget.toLowerCase()}"]`);
+          if (radioToCheck) radioToCheck.checked = true;
+
+          banner.innerHTML = `📡 Currently Tracking: ${selectedTarget} — Az: ${data.az.toFixed(1)}°, El: ${data.el.toFixed(1)}°`;
+          stopWrapper.classList.remove("hidden");
+          return;
+        }
+
+        // Normal tracking update
+        if (data.name.toLowerCase() === selectedTarget.toLowerCase()) {
+          banner.innerHTML = `📡 Currently Tracking: ${data.name} — Az: ${data.az.toFixed(1)}°, El: ${data.el.toFixed(1)}°`;
+          stopWrapper.classList.remove("hidden");
+        }
+
+      } catch (e) {
+        console.warn("❗ WebSocket non-JSON message:", event.data);
+      }
+    };
+
+
+
+
+
+
+
+
+
+
+
+
+    websocket.onclose = () => {
+      setTimeout(() => location.reload(), 2000);
+    };
+
+    document.body.addEventListener("change", (e) => {
+      if (e.target.name === "trackingTarget") {
+        selectedTarget = e.target.value;
+        if (websocket.readyState === WebSocket.OPEN) {
+          websocket.send(JSON.stringify({ track: selectedTarget }));
+        }
+        banner.innerHTML = `📡 Currently Tracking: ${selectedTarget}`;
+        stopWrapper.classList.remove("hidden");
+      }
+    });
+
+    document.getElementById("stopTrackingBtn").addEventListener("click", () => {
+      selectedTarget = null;
+      document.querySelectorAll('input[name="trackingTarget"]').forEach(r => r.checked = false);
+      if (websocket.readyState === WebSocket.OPEN) {
+        websocket.send(JSON.stringify({ track: "" }));
+      }
+      banner.innerHTML = "📡 Currently Tracking: --";
+      stopWrapper.classList.add("hidden");
+    });
+
+    async function loadSunMoonData() {
+      const res = await fetch("/sunmoon");
+      const data = await res.json();
+      document.getElementById("sunAz").textContent = `${data.sunAzimuth.toFixed(1)}°`;
+      document.getElementById("sunEl").textContent = `${data.sunElevation.toFixed(1)}°`;
+      document.getElementById("sunrise").textContent = data.sunRiseLocal;
+      document.getElementById("sunset").textContent = data.sunSetLocal;
+      document.getElementById("moonAz").textContent = `${data.moonAzimuth.toFixed(1)}°`;
+      document.getElementById("moonEl").textContent = `${data.moonElevation.toFixed(1)}°`;
+      document.getElementById("moonrise").textContent = data.moonRiseLocal;
+      document.getElementById("moonset").textContent = data.moonSetLocal;
+    }
+
+    async function loadSatelliteData() {
+      const res = await fetch("/satellites");
+      const data = await res.json();
+      const tbody = document.getElementById("satBody");
+      tbody.innerHTML = "";
+
+      data.forEach(sat => {
+        const row = document.createElement("tr");
+        if (sat.elevation > 0) row.classList.add("above-horizon");
+
+        row.innerHTML = `
+          <td><input type="radio" name="trackingTarget" value="${sat.name}"></td>
+          <td class="left">${sat.name}</td>
+          <td>${sat.azimuth.toFixed(1)}°</td>
+          <td>${sat.elevation.toFixed(1)}°</td>
+          <td>${sat.frequencyMHz.toFixed(3)}</td>
+          <td>${sat.correctedFreqMHz.toFixed(3)}</td>
+          <td>${sat.aosLocal}</td>
+          <td>${sat.tcaLocal}</td>
+          <td>${sat.losLocal}</td>
+          <td>${sat.maxElevation.toFixed(1)}</td>
+          <td>${sat.passDuration}</td>
+          <td>${sat.timeToEvent}</td>
+        `;
+
+        tbody.appendChild(row);
+      });
+
+      if (selectedTarget) {
+        const radioToCheck = document.querySelector(`input[name="trackingTarget"][value="${selectedTarget}"]`);
+        if (radioToCheck) radioToCheck.checked = true;
+      }
+    }
+
+    function updateClocks() {
+      const now = new Date();
+      const utcStr = now.toUTCString().split(" ")[4];
+      const localStr = now.toLocaleTimeString('en-GB', { hour12: false });
+      document.getElementById("utcTime").textContent = `UTC: ${utcStr}`;
+      document.getElementById("localTime").textContent = `Local: ${localStr}`;
+    }
+
+    function getHourOfYearUTC() {
+      const now = new Date();
+      const startOfYear = new Date(Date.UTC(now.getUTCFullYear(), 0, 1));
+      const diffMs = now - startOfYear;
+      return Math.floor(diffMs / (1000 * 60 * 60));
+    }
+
+    const hourNumber = getHourOfYearUTC().toString().padStart(4, '0');
+    const moonBaseUrl = 'https://svs.gsfc.nasa.gov/vis/a000000/a005400/a005416/frames/216x216_1x1_30p/';
+    document.getElementById('moonImage').src = moonBaseUrl + `moon.${hourNumber}.jpg`;
+
+    function buildSunChart() {
+
+      const now = new Date();
+      const decimal = d => d.getHours() + d.getMinutes() / 60 + d.getSeconds() / 3600;
+      const sunPos = h => SunCalc.getPosition(new Date(now.setHours(0, 0, 0, 0) + h * 3600 * 1000), latitude, longitude).altitude * 180 / Math.PI;
+
+      const sunData = [];
+      const times = SunCalc.getTimes(new Date(), latitude, longitude);
+      const sunrise = decimal(times.sunrise), sunset = decimal(times.sunset), transit = decimal(times.solarNoon);
+      const transitElevation = sunPos(transit);
+      for (let h = sunrise - 1; h <= sunset + 1; h += 0.25) sunData.push([h, sunPos(h)]);
+
+      const chart = Highcharts.chart('sunChart', {
+  chart: {
+    type: 'spline',
+    backgroundColor: '#0d1117'
+  },
+  title: null,
+  xAxis: {
+    title: { text: 'Time (Hours)', style: { color: '#c9d1d9' }},
+    labels: { style: { color: '#c9d1d9' }},
+    min: sunrise - 1,
+    max: sunset + 1
+  },
+  yAxis: {
+    title: { text: 'Elevation (°)', style: { color: '#c9d1d9' }},
+    labels: { style: { color: '#c9d1d9' }},
+    min: 0,
+    max: 90,
+    plotBands: [{
+      from: 0,
+      to: 90,
+      color: 'rgba(255, 215, 0, 0.1)'
+    }]
+  },
+  legend: { enabled: false },
+  credits: { enabled: false },
+  tooltip: {
+    useHTML: true,
+    formatter: function () {
+      const now = this.x;
+      const timeToSunset = Math.max(0, sunset - now);
+      const h = Math.floor(timeToSunset);
+      const m = Math.floor((timeToSunset - h) * 60);
+      return `
+        <b>☀️ Current Sun</b><br>
+        Elevation: <b>${this.y.toFixed(1)}°</b><br>
+        Time: <b>${formatTime(this.x)}</b><br>
+        Time until sunset: <b>${h}h ${m}m</b>
+      `;
+    },
+    backgroundColor: '#161b22',
+    borderColor: '#ffa500',
+    style: {
+      color: '#ffd700',
+      fontSize: '14px'
+    }
+  },
+
+
+        series: [
+          {
+            name: 'Sun',
+            data: sunData,
+            color: '#f6cb3e',
+            marker: { enabled: false }
+          },
+          {
+            type: 'scatter',
+            id: 'sunMarker',
+            data: [{
+              x: decimal(new Date()),
+              y: SunCalc.getPosition(new Date(), latitude, longitude).altitude * 180 / Math.PI
+            }],
+            marker: { enabled: false },
+            dataLabels: {
+              enabled: true,
+              useHTML: true,
+              formatter: function () {
+                return '☀️';
+              },
+              style: {
+                fontSize: '24px'
+              },
+              align: 'center',
+              verticalAlign: 'middle',
+              y: 0
+            }
+          },
+          {
+            type: 'scatter',
+            name: 'Transit Time',
+            data: [{
+              x: transit,
+              y: transitElevation
+            }],
+            marker: {
+              enabled: true,
+              radius: 4,
+              fillColor: '#ffa500'
+            },
+            dataLabels: {
+              enabled: true,
+              formatter: function () {
+                return formatTime(this.x);
+              },
+              style: {
+                color: '#ffa500',
+                fontWeight: 'bold',
+                fontSize: '14px'
+              },
+              align: 'center',
+              verticalAlign: 'top',
+              y: -30
+            }
+          }
+        ]
+
+
+      });
+
+
+
+      setInterval(() => {
+        const now = new Date();
+        const h = now.getHours() + now.getMinutes() / 60 + now.getSeconds() / 3600;
+        const el = SunCalc.getPosition(now, latitude, longitude).altitude * 180 / Math.PI;
+        chart.get('sunMarker').setData([{ x: h, y: el }]);
+      }, 1000);
+
+    }
+
+
+    function formatTime(decimalHour) {
+  const hours = Math.floor(decimalHour);
+  const minutes = Math.floor((decimalHour - hours) * 60);
+  return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
+}
+
+
+
+
+
+    // Initial triggers
+    buildSunChart();
+    loadSunMoonData();
+    loadSatelliteData();
+    updateClocks();
+    setInterval(() => {
+      loadSunMoonData();
+      loadSatelliteData();
+      updateClocks();
+    }, 1000);
+
+    window.onload = function() {
+      fetch('/observer')
+              .then(response => response.json())
+              .then(data => {
+                latitude = data.latitude;
+                longitude = data.longitude;
+
+                console.log(latitude)
+                console.log(longitude)
+
+                console.log("Observer Latitude: " + latitude);
+                console.log("Observer Longitude: " + longitude);
+
+                // Here you can update any part of the page that uses latitude/longitude
+                // For example, updating a map or other display element
+              })
+              .catch(error => console.error('Error fetching observer data:', error));
+    };
+
+
+
+
+
+
+
+
+  </script>
+</body>
+
+</html>

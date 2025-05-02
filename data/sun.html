@@ -1,10 +1,186 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>$Title$</title>
+    <meta charset="UTF-8">
+    <title>Live Sun Elevation</title>
+    <script src="https://code.highcharts.com/highcharts.js"></script>
+    <script src="https://unpkg.com/suncalc@1.9.0/suncalc.js"></script>
+    <style>
+        body {
+            background-color: #0d1117;
+            color: #c9d1d9;
+            font-family: Arial, sans-serif;
+            padding: 1rem;
+        }
+        #sunChart {
+            height: 500px;
+            max-width: 900px;
+            margin: auto;
+        }
+    </style>
 </head>
 <body>
-$END$
+<div id="sunChart"></div>
+
+<script>
+    const latitude = 46.4668;
+    const longitude = 6.8616;
+
+    function getDecimalHour(date) {
+        return date.getHours() + date.getMinutes() / 60 + date.getSeconds() / 3600;
+    }
+
+    function formatTime(decimalHour) {
+        const hours = Math.floor(decimalHour);
+        const minutes = Math.floor((decimalHour - hours) * 60);
+        return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
+    }
+
+    function getSunElevationAtHour(decimalHour) {
+        const base = new Date();
+        base.setHours(0, 0, 0, 0);
+        const targetTime = new Date(base.getTime() + decimalHour * 3600 * 1000);
+        const pos = SunCalc.getPosition(targetTime, latitude, longitude);
+        return pos.altitude * (180 / Math.PI);
+    }
+
+    function getCurrentSunElevation() {
+        const now = new Date();
+        const pos = SunCalc.getPosition(now, latitude, longitude);
+        return pos.altitude * (180 / Math.PI);
+    }
+
+    // ☀️ Sunrise, Sunset, and Transit time
+    const times = SunCalc.getTimes(new Date(), latitude, longitude);
+    const sunrise = getDecimalHour(times.sunrise);
+    const sunset = getDecimalHour(times.sunset);
+    const transit = getDecimalHour(times.solarNoon);
+    const transitElevation = getSunElevationAtHour(transit);
+
+    // Build sun elevation curve (every 15 min)
+    const sunData = [];
+    for (let h = sunrise - 1; h <= sunset + 1; h += 0.25) {
+        sunData.push([h, getSunElevationAtHour(h)]);
+    }
+
+    // Draw chart
+    const chart = Highcharts.chart('sunChart', {
+        chart: {
+            type: 'spline',
+            backgroundColor: '#0d1117'
+        },
+        title: null,
+        xAxis: {
+            title: { text: 'Time (Hours)', style: { color: '#c9d1d9' }},
+            labels: { style: { color: '#c9d1d9' }},
+            min: sunrise - 1,
+            max: sunset + 1
+        },
+        yAxis: {
+            title: { text: 'Elevation (°)', style: { color: '#c9d1d9' }},
+            labels: { style: { color: '#c9d1d9' }},
+            min: 0,
+            max: 70,
+            plotBands: [{
+                from: 0,
+                to: 90,
+                color: 'rgba(255, 215, 0, 0.1)'
+            }]
+        },
+        legend: { enabled: false },
+        credits: { enabled: false },
+        tooltip: {
+            useHTML: true,
+            formatter: function () {
+                const now = this.x;
+                const timeToSunset = Math.max(0, sunset - now);
+                const h = Math.floor(timeToSunset);
+                const m = Math.floor((timeToSunset - h) * 60);
+                return `
+          <b>☀️ Current Sun</b><br>
+          Elevation: <b>${this.y.toFixed(1)}°</b><br>
+          Time: <b>${formatTime(this.x)}</b><br>
+          Time until sunset: <b>${h}h ${m}m</b>
+        `;
+            },
+            backgroundColor: '#161b22',
+            borderColor: '#ffa500',
+            style: {
+                color: '#ffd700',
+                fontSize: '14px'
+            }
+        },
+        series: [
+            {
+                name: 'Sun Elevation',
+                data: sunData,
+                color: '#58a6ff',
+                marker: { enabled: false }
+            },
+            {
+                type: 'scatter',
+                name: 'Current Sun',
+                id: 'sunMarker',
+                data: [{
+                    x: 0,
+                    y: -20
+                }],
+                marker: { enabled: false },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    formatter: function () {
+                        return '☀️';
+                    },
+                    style: {
+                        fontSize: '24px'
+                    },
+                    align: 'center',
+                    verticalAlign: 'middle'
+                }
+            },
+            {
+                type: 'scatter',
+                name: 'Transit Time',
+                data: [{
+                    x: transit,
+                    y: transitElevation
+                }],
+                marker: {
+                    enabled: true,
+                    radius: 4,
+                    fillColor: '#ffa500'
+                },
+                dataLabels: {
+                    enabled: true,
+                    formatter: function () {
+                        return formatTime(this.x);
+                    },
+                    style: {
+                        color: '#ffa500',
+                        fontWeight: 'bold',
+                        fontSize: '14px'
+                    },
+                    align: 'center',
+                    verticalAlign: 'top',
+                    y: -30
+                }
+            }
+        ]
+    });
+
+    // 🔁 Real-time ☀️ emoji movement
+    setInterval(() => {
+        const now = new Date();
+        const currentTime = getDecimalHour(now);
+        const currentElevation = getCurrentSunElevation();
+
+        const sunSeries = chart.get('sunMarker');
+        sunSeries.setData([{
+            x: currentTime,
+            y: currentElevation
+        }], true, false, false);
+    }, 1000);
+</script>
 </body>
 </html>

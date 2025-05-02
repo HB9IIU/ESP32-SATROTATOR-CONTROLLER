@@ -113,6 +113,29 @@ void drawSpeakerON(int x, int y);
 void drawSpeakerOFF(int x, int y);
 void webSocketEvent(uint8_t num, WStype_t type, uint8_t *payload, size_t length);
 void startWebSocket();
+
+//--- new functions
+void drawButton(int x, int y, int w, int h, int radius, uint16_t buttonColor, uint16_t textColor, const char* label) {
+    // Draw button background with rounded corners
+    tft.fillRoundRect(x, y, w, h, radius, buttonColor);
+  
+    // Draw button border with rounded corners
+    tft.drawRoundRect(x, y, w, h, radius, TFT_WHITE);
+  
+    // Set text color and font
+    tft.setTextColor(textColor);
+    tft.setTextSize(2); // Adjust text size as needed
+  
+    // Calculate text width and height for centering
+    int16_t textWidth = tft.textWidth(label);
+    int16_t textHeight = tft.fontHeight();
+  
+    // Draw the label in the center of the button
+    tft.setCursor(x + (w - textWidth) / 2, y + (h - textHeight) / 2);
+    tft.print(label);
+  }
+
+
 //---------------------------------------------------------------------------------------------------
 void displaySysInfo()
 {
@@ -274,6 +297,8 @@ void TFTprint(const String &text, uint16_t color)
     // Move to the next line for subsequent calls
     currentLine++;
 }
+
+
 void logWithBoxFrame(const String &message)
 {
     int messageLength = message.length();
@@ -688,7 +713,7 @@ void getTLEelements(int catalogNumber)
         retrieveTLEelementsForSatellite(catalogNumber, true);
     }
 
-    // The we check if the catalog number has changed
+    // Then we check if the catalog number has changed
     if (storedCatalogNumber != catalogNumber)
     {
         Serial.println("Satellite has changed. Clearing old preferences...");
@@ -2420,6 +2445,9 @@ void retrieveTLEelementsForSatellite(int catalogNumber, bool displayOnTft)
     }
     http.end();
 }
+
+
+
 void displayTableNext10Passes()
 {
     passinfo overpass;
@@ -3033,6 +3061,33 @@ void setup()
     Serial.begin(115200);
     initializeTFT();
     initializeBuzzer();
+// Define button properties
+tft.fillScreen(TFT_BLACK); // Clear screen
+// Define button properties
+int buttonX = 50; // X position
+int buttonY = 50; // Y position
+int buttonWidth = 200; // Button width
+int buttonHeight = 50; // Button height
+int buttonRadius = 10; // Radius of rounded corners
+// Draw the button with rounded corners
+drawButton(buttonX, buttonY, buttonWidth, buttonHeight, buttonRadius, TFT_BLUE, TFT_WHITE, "GO");
+
+
+    TFTprint("1");
+    TFTprint("2");
+    TFTprint("3");
+    TFTprint("4");
+    TFTprint("5");
+    TFTprint("6");
+    TFTprint("7");
+    TFTprint("8");
+    TFTprint("9");
+    TFTprint("10");
+
+
+
+    delay(100000);
+
     displaySplashScreen(2500);
     displayWelcomeMessage(2500);
     checkAndApplyTFTCalibrationData(false); // set true for forcing calibration
@@ -3075,6 +3130,7 @@ void setup()
     // displayTableNext10Passes();
     // displayMapWithMultiPasses();
 }
+
 
 void loop()
 {

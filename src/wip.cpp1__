@@ -1,0 +1,651 @@
+// wip.cpp
+#include "myconfig.h"
+#include <Preferences.h>
+#include <WiFi.h>
+#include <HTTPClient.h>
+#include <time.h>
+#include <NTPClient.h>
+#include <Sgp4.h>
+#include <WebSocketsServer.h>
+
+#define TLE_UPDATE_INTERVAL_HOURS 10
+
+WiFiUDP ntpUDP;
+NTPClient timeClient(ntpUDP, "pool.ntp.org", 0, 60000);
+Preferences preferences;
+Sgp4 sat;
+WebSocketsServer webSocket = WebSocketsServer(81);
+
+unsigned long lastNtpSync = 0;
+unsigned long lastTrackTime = 0;
+int tzOffset;
+const int numSatellitesToTrack = sizeof(satellitesToTrack) / sizeof(satellitesToTrack[0]);
+int trackedSatIndex = 2;
+
+float previousDist[numSatellitesToTrack] = {0};
+unsigned long previousTime[numSatellitesToTrack] = {0};
+
+void connectToWiFi();
+bool synchronizeTimeWithNTP();
+void downloadTLEsAndStore();
+void loadAndTrackSatelliteByCatalogNumber(int catalogNumber, bool shouldBroadcast);
+void trackConfiguredSatellites();
+void checkAndRefreshTLEsIfNeeded();
+
+// FOR SUN AND MOON
+#include <math.h>
+#include <time.h>
+double getJulianDate();
+void getAdvancedMoonAzEl(double &azimuth, double &elevation);
+
+const double DEG2RAD = PI / 180.0;
+const double RAD2DEG = 180.0 / PI;
+
+double fixAngle(double deg)
+{
+    return fmod(fmod(deg, 360.0) + 360.0, 360.0);
+}
+
+double getJulianDate()
+{
+    time_t now = time(nullptr);
+    struct tm *utc = gmtime(&now);
+
+    int year = utc->tm_year + 1900;
+    int month = utc->tm_mon + 1;
+    int day = utc->tm_mday;
+    int hour = utc->tm_hour;
+    int minute = utc->tm_min;
+    int second = utc->tm_sec;
+
+    if (month <= 2)
+    {
+        year -= 1;
+        month += 12;
+    }
+
+    int A = year / 100;
+    int B = 2 - A + A / 4;
+
+    double JD = int(365.25 * (year + 4716)) +
+                int(30.6001 * (month + 1)) +
+                day + B - 1524.5 +
+                (hour + minute / 60.0 + second / 3600.0) / 24.0;
+    return JD;
+}
+void getSunAzElAndRiseSet(double &azimuth, double &elevation, double &sunriseUTC, double &sunsetUTC)
+{
+    double JD = getJulianDate();
+    double d = JD - 2451545.0;
+
+    // Mean anomaly of the Sun
+    double g = radians(fmod(357.529 + 0.98560028 * d, 360));
+    double q = fmod(280.459 + 0.98564736 * d, 360); // Mean longitude
+    double L = fmod(q + 1.915 * sin(g) + 0.020 * sin(2 * g), 360);
+    double e = radians(23.439 - 0.00000036 * d); // Obliquity
+
+    double L_rad = radians(L);
+
+    // Sun's right ascension and declination
+    double RA = atan2(cos(e) * sin(L_rad), cos(L_rad));
+    double dec = asin(sin(e) * sin(L_rad));
+
+    // Local sidereal time
+    double GMST = fmod(280.16 + 360.9856235 * d, 360);
+    double LST = radians(fmod(GMST + OBSERVER_LONGITUDE, 360));
+
+    // Hour angle
+    double HA = LST - RA;
+
+    // Convert to azimuth and elevation
+    double latRad = radians(OBSERVER_LATITUDE);
+    elevation = asin(sin(dec) * sin(latRad) + cos(dec) * cos(latRad) * cos(HA));
+    azimuth = atan2(-sin(HA), tan(dec) * cos(latRad) - sin(latRad) * cos(HA));
+    azimuth = fmod(degrees(azimuth) + 360, 360);
+    elevation = degrees(elevation);
+
+    // ---------- Sunrise/Sunset Calculation ----------
+
+    // Solar declination is already computed as `dec`
+    double cosH = (cos(radians(90.833)) - sin(latRad) * sin(dec)) / (cos(latRad) * cos(dec));
+
+    if (cosH < -1)
+    {
+        // Sun is always up
+        sunriseUTC = 0;
+        sunsetUTC = 24;
+    }
+    else if (cosH > 1)
+    {
+        // Sun is always down
+        sunriseUTC = -1;
+        sunsetUTC = -1;
+    }
+    else
+    {
+        double H = acos(cosH); // In radians
+        H = degrees(H) / 15.0; // Convert to hours
+
+        double solarNoon = fmod((720 - 4 * OBSERVER_LONGITUDE - 60 * 0) / 60.0, 24); // Assume UTC offset = 0
+        sunriseUTC = solarNoon - H;
+        sunsetUTC = solarNoon + H;
+    }
+}
+
+double julianFromYMD(int year, int month, int day)
+{
+    if (month <= 2)
+    {
+        year--;
+        month += 12;
+    }
+    int A = year / 100;
+    int B = 2 - A + A / 4;
+    return floor(365.25 * (year + 4716)) +
+           floor(30.6001 * (month + 1)) +
+           day + B - 1524.5;
+}
+
+void getMoonAzElAndRiseSet(double &azimuth, double &elevation, double &moonriseUTC, double &moonsetUTC)
+{
+    double JD = getJulianDate();
+    double D = JD - 2451545.0;
+
+    // --- Position calculation ---
+    // Mean orbital elements
+    double L = fixAngle(218.316 + 13.176396 * D);     // Mean longitude
+    double M = fixAngle(134.963 + 13.064993 * D);     // Mean anomaly
+    double F = fixAngle(93.272 + 13.229350 * D);      // Argument of latitude
+    double D_sun = fixAngle(297.850 + 12.190749 * D); // Elongation
+    double N = fixAngle(125.044 - 0.0529538 * D);     // Ascending node
+
+    // Convert to radians
+    L *= DEG2RAD;
+    M *= DEG2RAD;
+    F *= DEG2RAD;
+    D_sun *= DEG2RAD;
+    N *= DEG2RAD;
+
+    // Ecliptic longitude and latitude
+    double lon = L + DEG2RAD * (6.289 * sin(M) +
+                                1.274 * sin(2 * D_sun - M) +
+                                0.658 * sin(2 * D_sun) +
+                                0.214 * sin(2 * M) +
+                                0.11 * sin(D_sun));
+    double lat = DEG2RAD * (5.128 * sin(F) +
+                            0.280 * sin(M + F) +
+                            0.277 * sin(M - F) +
+                            0.173 * sin(2 * D_sun - F));
+
+    // Obliquity of the ecliptic
+    double e = DEG2RAD * (23.439 - 0.00000036 * D);
+
+    // Convert to RA and Dec
+    double x = cos(lat) * cos(lon);
+    double y = cos(lat) * sin(lon) * cos(e) - sin(lat) * sin(e);
+    double z = cos(lat) * sin(lon) * sin(e) + sin(lat) * cos(e);
+
+    double RA = atan2(y, x);
+    double dec = asin(z);
+
+    // Local Sidereal Time
+    double T = D / 36525.0;
+    double GMST = fixAngle(280.46061837 + 360.98564736629 * D +
+                           T * T * (0.000387933 - T / 38710000.0));
+    double LST = DEG2RAD * fixAngle(GMST + OBSERVER_LONGITUDE);
+
+    // Hour angle
+    double HA = LST - RA;
+
+    // Convert to horizontal coordinates
+    double latRad = DEG2RAD * OBSERVER_LATITUDE;
+    elevation = asin(sin(dec) * sin(latRad) + cos(dec) * cos(latRad) * cos(HA));
+    azimuth = atan2(-sin(HA),
+                    tan(dec) * cos(latRad) - sin(latRad) * cos(HA));
+    azimuth = fixAngle(RAD2DEG * azimuth);
+    elevation = RAD2DEG * elevation;
+
+    // --- Moonrise and Moonset (by sweeping elevations every hour) ---
+    time_t now = time(nullptr);
+    struct tm *utc = gmtime(&now);
+    int year = utc->tm_year + 1900;
+    int month = utc->tm_mon + 1;
+    int day = utc->tm_mday;
+
+    double jdMidnight = julianFromYMD(year, month, day);
+
+    double prevEl = 0, currEl = 0;
+    bool foundRise = false, foundSet = false;
+    moonriseUTC = -1;
+    moonsetUTC = -1;
+
+    for (int h = 0; h <= 24; ++h)
+    {
+        double testJD = jdMidnight + h / 24.0;
+        double dtest = testJD - 2451545.0;
+
+        // Repeat orbital elements (could be refactored for performance)
+        double Lm = fixAngle(218.316 + 13.176396 * dtest);
+        double Mm = fixAngle(134.963 + 13.064993 * dtest);
+        double Fm = fixAngle(93.272 + 13.229350 * dtest);
+        double Dm = fixAngle(297.850 + 12.190749 * dtest);
+
+        Lm *= DEG2RAD;
+        Mm *= DEG2RAD;
+        Fm *= DEG2RAD;
+        Dm *= DEG2RAD;
+
+        double lonm = Lm + DEG2RAD * (6.289 * sin(Mm) +
+                                      1.274 * sin(2 * Dm - Mm) +
+                                      0.658 * sin(2 * Dm) +
+                                      0.214 * sin(2 * Mm) +
+                                      0.11 * sin(Dm));
+        double latm = DEG2RAD * (5.128 * sin(Fm));
+
+        double em = DEG2RAD * (23.439 - 0.00000036 * dtest);
+        double xm = cos(latm) * cos(lonm);
+        double ym = cos(latm) * sin(lonm) * cos(em) - sin(latm) * sin(em);
+        double zm = cos(latm) * sin(lonm) * sin(em) + sin(latm) * cos(em);
+
+        double RAm = atan2(ym, xm);
+        double decm = asin(zm);
+
+        double GMSTm = fixAngle(280.46061837 + 360.98564736629 * dtest);
+        double LSTm = DEG2RAD * fixAngle(GMSTm + OBSERVER_LONGITUDE);
+        double HAm = LSTm - RAm;
+
+        double elm = asin(sin(decm) * sin(latRad) + cos(decm) * cos(latRad) * cos(HAm));
+        elm = RAD2DEG * elm;
+
+        currEl = elm;
+
+        if (h > 0)
+        {
+            if (!foundRise && prevEl < 0 && currEl >= 0)
+            {
+                double t = h - 1 + (-prevEl / (currEl - prevEl));
+                moonriseUTC = t;
+                foundRise = true;
+            }
+            if (!foundSet && prevEl >= 0 && currEl < 0)
+            {
+                double t = h - 1 + (prevEl / (prevEl - currEl));
+                moonsetUTC = t;
+                foundSet = true;
+            }
+        }
+
+        prevEl = currEl;
+    }
+}
+
+String formatTimeUTC(double hourUTC)
+{
+    if (hourUTC < 0 || hourUTC >= 24)
+        return "--:--";
+    int h = int(hourUTC);
+    int m = int((hourUTC - h) * 60);
+    char buffer[6];
+    snprintf(buffer, sizeof(buffer), "%02d:%02d", h, m);
+    return String(buffer);
+}
+String formatTimeLocal(double hourUTC) {
+    if (hourUTC < 0 || hourUTC >= 24) return "--:--";
+
+    double offsetHours = tzOffset / 3600.0;
+    hourUTC += offsetHours;
+    if (hourUTC >= 24) hourUTC -= 24;
+    if (hourUTC < 0) hourUTC += 24;
+
+    int h = int(hourUTC);
+    int m = int((hourUTC - h) * 60);
+    char buffer[6];
+    snprintf(buffer, sizeof(buffer), "%02d:%02d", h, m);
+    return String(buffer);
+}
+
+//----------------------------------------------------
+void connectToWiFi()
+{
+    WiFi.setHostname("ESP32-AzEl-Server");
+    int attempt = 0;
+    const int maxAttempts = 5;
+
+    while (WiFi.status() != WL_CONNECTED)
+    {
+        const char *ssid = (attempt < maxAttempts) ? WIFI_SSID : WIFI_SSID_ALT;
+        const char *password = (attempt < maxAttempts) ? WIFI_PASSWORD : WIFI_PASSWORD_ALT;
+
+        WiFi.disconnect(true);
+        WiFi.begin(ssid, password);
+
+        Serial.printf("Connecting to %s...\n", ssid);
+        for (int i = 0; i < 10; ++i)
+        {
+            if (WiFi.status() == WL_CONNECTED)
+            {
+                Serial.println("Connected.");
+                Serial.printf("RSSI: %ld dBm\n", WiFi.RSSI());
+                return;
+            }
+            delay(500);
+        }
+
+        attempt++;
+        if (attempt == maxAttempts * 2)
+        {
+            Serial.println("Retrying Wi-Fi connections from scratch...");
+            attempt = 0;
+        }
+    }
+}
+int getTimeZoneOffsetFromAPI() {
+    String url = "http://api.timezonedb.com/v2.1/get-time-zone?key=" + String(TIMEZONE_API_KEY) + "&format=json&by=position&lat=46.2044&lng=6.1432";
+    HTTPClient http;
+    http.begin(url);
+    int httpCode = http.GET();
+
+    if (httpCode == 200) {
+        String payload = http.getString();
+        int idx = payload.indexOf("\"gmtOffset\":");
+        if (idx >= 0) {
+            int end = payload.indexOf(",", idx);
+            String offsetStr = payload.substring(idx + 12, end);
+            http.end();
+            return offsetStr.toInt();  // in seconds
+        }
+    }
+
+    http.end();
+    return 7200;  // fallback to UTC+2
+}
+
+bool synchronizeTimeWithNTP()
+{
+    const char *ntpServers[] = {
+        "time.google.com",
+        "time.nist.gov",
+        "time.cloudflare.com",
+        "pool.ntp.org",
+        "europe.pool.ntp.org"};
+    const int maxRetries = 3;
+
+    for (auto server : ntpServers)
+    {
+        timeClient.end();
+        timeClient.setPoolServerName(server);
+        timeClient.begin();
+
+        Serial.printf("Trying NTP server: %s\n", server);
+
+        for (int attempt = 0; attempt < maxRetries; ++attempt)
+        {
+            if (timeClient.update() && timeClient.getEpochTime() > 1000000000)
+            {
+                time_t currentTime = timeClient.getEpochTime();
+                struct timeval nowTime;
+                nowTime.tv_sec = currentTime;
+                nowTime.tv_usec = 0;
+                settimeofday(&nowTime, nullptr);
+
+
+                Serial.printf("Time synced: %lu\n", currentTime);
+                return true;
+            }
+            delay(2000);
+        }
+    }
+    Serial.println("❌ NTP sync failed.");
+    return false;
+}
+
+void downloadTLEsAndStore()
+{
+    preferences.begin("tle-storage", false);
+
+    for (const auto &sat : satellites)
+    {
+        int catnr = sat.catalogNumber;
+        String url = "http://www.celestrak.org/NORAD/elements/gp.php?CATNR=" + String(catnr) + "&FORMAT=TLE";
+        Serial.println("Fetching: " + url);
+
+        HTTPClient http;
+        http.begin(url);
+        int code = http.GET();
+
+        if (code == 200)
+        {
+            String payload = http.getString();
+            int n1 = payload.indexOf('\n');
+            int n2 = payload.indexOf('\n', n1 + 1);
+
+            String name = payload.substring(0, n1);
+            name.trim();
+            String l1 = payload.substring(n1 + 1, n2);
+            l1.trim();
+            String l2 = payload.substring(n2 + 1);
+            l2.trim();
+
+            String base = String(catnr);
+            preferences.putString((base + "_name").c_str(), name);
+            preferences.putString((base + "_tle1").c_str(), l1);
+            preferences.putString((base + "_tle2").c_str(), l2);
+
+            Serial.printf("Stored: %s (CATNR %d)\n", name.c_str(), catnr);
+        }
+        else
+        {
+            Serial.printf("HTTP error %d for CATNR %d\n", code, catnr);
+        }
+
+        http.end();
+        delay(500);
+    }
+
+    preferences.putULong("last_update", time(nullptr));
+    preferences.end();
+}
+
+void loadAndTrackSatelliteByCatalogNumber(int catalogNumber, bool shouldBroadcast)
+{
+    preferences.begin("tle-storage", true);
+    String base = String(catalogNumber);
+    String name = preferences.getString((base + "_name").c_str(), "");
+    String l1 = preferences.getString((base + "_tle1").c_str(), "");
+    String l2 = preferences.getString((base + "_tle2").c_str(), "");
+    preferences.end();
+
+    if (name == "" || l1 == "" || l2 == "")
+    {
+        Serial.printf("❌ TLE missing for CATNR %d\n", catalogNumber);
+        return;
+    }
+
+    char nameBuf[64];
+    strncpy(nameBuf, name.c_str(), sizeof(nameBuf));
+    nameBuf[63] = '\0';
+    char l1Buf[130];
+    strncpy(l1Buf, l1.c_str(), sizeof(l1Buf));
+    l1Buf[129] = '\0';
+    char l2Buf[130];
+    strncpy(l2Buf, l2.c_str(), sizeof(l2Buf));
+    l2Buf[129] = '\0';
+
+    sat.site(OBSERVER_LATITUDE, OBSERVER_LONGITUDE, OBSERVER_ALTITUDE);
+    sat.init(nameBuf, l1Buf, l2Buf);
+    sat.findsat((unsigned long)time(nullptr));
+
+    int y, m, d, h, min;
+    double sec;
+    invjday(sat.satJd, 1, true, y, m, d, h, min, sec);
+
+    int satIndex = -1;
+    for (int i = 0; i < numSatellitesToTrack; i++)
+    {
+        if (satellitesToTrack[i] == catalogNumber)
+        {
+            satIndex = i;
+            break;
+        }
+    }
+
+    float radialVelocity = 0.0;
+    unsigned long nowMillis = millis();
+    if (satIndex >= 0 && previousTime[satIndex] > 0)
+    {
+        float dt = (nowMillis - previousTime[satIndex]) / 1000.0;
+        if (dt > 0.1)
+        {
+            radialVelocity = (sat.satDist - previousDist[satIndex]) / dt;
+        }
+    }
+
+    if (satIndex >= 0)
+    {
+        previousDist[satIndex] = sat.satDist;
+        previousTime[satIndex] = nowMillis;
+    }
+
+    // Get downlink frequency from satellites[] (in MHz)
+    float nominalFreqMHz = 0.0;
+    for (int i = 0; i < sizeof(satellites) / sizeof(satellites[0]); ++i)
+    {
+        if (satellites[i].catalogNumber == catalogNumber)
+        {
+            nominalFreqMHz = satellites[i].downlinkFreqMHz;
+            break;
+        }
+    }
+
+    float correctedHz = nominalFreqMHz * 1e6;
+    if (nominalFreqMHz > 0.0)
+    {
+        correctedHz *= (1 - radialVelocity / 299792.458); // Doppler correction
+    }
+
+    Serial.printf("\n🛰️  %s\n", nameBuf);
+    Serial.printf("UTC Time: %02d/%02d/%04d %02d:%02d:%02.0f\n", d, m, y, h, min, sec);
+    Serial.printf("Az: %.1f°, El: %.1f°, Dist: %.1f km\n", sat.satAz, sat.satEl, sat.satDist);
+    Serial.printf("Lat: %.4f°, Lon: %.4f°, Alt: %.1f km\n", sat.satLat, sat.satLon, sat.satAlt);
+    Serial.printf("Radial velocity ≈ %.3f km/s\n", radialVelocity);
+    Serial.printf("Nominal frequency: %.6f MHz\n", nominalFreqMHz);
+    Serial.printf("Corrected frequency: %.6f MHz\n", correctedHz / 1e6);
+
+    if (shouldBroadcast)
+    {
+        char msg[160];
+        snprintf(msg, sizeof(msg),
+                 "{\"name\":\"%s\",\"az\":%.1f,\"el\":%.1f,\"freq\":%.6f}",
+                 nameBuf, sat.satAz, sat.satEl, correctedHz / 1e6);
+        webSocket.broadcastTXT(msg);
+        Serial.println("WebSocket sent: " + String(msg));
+    }
+}
+
+void trackConfiguredSatellites()
+{
+    for (int i = 0; i < numSatellitesToTrack; i++)
+    {
+        bool broadcast = (i == trackedSatIndex);
+        loadAndTrackSatelliteByCatalogNumber(satellitesToTrack[i], broadcast);
+    }
+}
+
+void checkAndRefreshTLEsIfNeeded()
+{
+    preferences.begin("tle-storage", true);
+    unsigned long lastUpdate = preferences.getULong("last_update", 0);
+    preferences.end();
+
+    unsigned long now = time(nullptr);
+    unsigned long interval = TLE_UPDATE_INTERVAL_HOURS * 3600;
+    if (lastUpdate == 0 || (now - lastUpdate) > interval)
+    {
+        Serial.println("TLE update required.");
+        downloadTLEsAndStore();
+    }
+}
+
+void setup()
+{
+    Serial.begin(115200);
+    delay(2000);  
+
+    connectToWiFi();
+
+    tzOffset = getTimeZoneOffsetFromAPI();
+
+    synchronizeTimeWithNTP();
+    delay(2000);  // ✅ Give it time to apply the TZ shift!
+
+    time_t now = time(nullptr);
+    struct tm *utc = gmtime(&now);
+    struct tm *local = localtime(&now);
+
+
+    Serial.printf("TZ active: %s / %s\n", tzname[0], tzname[1]);
+
+    Serial.printf("🕒 UTC time   : %02d:%02d\n", utc->tm_hour, utc->tm_min);
+    Serial.printf("🕒 Local time : %02d:%02d\n", local->tm_hour, local->tm_min);
+    delay(5000);  // ✅ Give it time to apply the TZ shift!
+
+    lastNtpSync = millis();
+
+    checkAndRefreshTLEsIfNeeded();
+
+    webSocket.begin();
+    webSocket.onEvent([](uint8_t num, WStype_t type, uint8_t *payload, size_t length)
+                      {
+        if (type == WStype_CONNECTED) {
+            Serial.printf("WebSocket client [%u] connected\n", num);
+        } else if (type == WStype_DISCONNECTED) {
+            Serial.printf("WebSocket client [%u] disconnected\n", num);
+        } });
+}
+
+void loop()
+{
+    webSocket.loop();
+    unsigned long currentMillis = millis();
+
+    if (currentMillis - lastTrackTime > 1000)
+    {
+        trackConfiguredSatellites();
+
+        double az, el, rise, set;
+
+        // 🌞 SUN
+        getSunAzElAndRiseSet(az, el, rise, set);
+        Serial.printf("☀️  Sun Azimuth: %.2f°, Elevation: %.2f°\n", az, el);
+        Serial.printf("🌅 Sunrise: %s local / %s UTC\n",
+                      formatTimeLocal(rise).c_str(),
+                      formatTimeUTC(rise).c_str());
+        Serial.printf("🌇 Sunset : %s local / %s UTC\n",
+                      formatTimeLocal(set).c_str(),
+                      formatTimeUTC(set).c_str());
+
+        // 🌕 MOON
+        getMoonAzElAndRiseSet(az, el, rise, set);
+        Serial.printf("🌕 Moon Azimuth: %.2f°, Elevation: %.2f°\n", az, el);
+        Serial.printf("🌙 Moonrise: %s local / %s UTC\n",
+                      formatTimeLocal(rise).c_str(),
+                      formatTimeUTC(rise).c_str());
+        Serial.printf("🌙 Moonset : %s local / %s UTC\n",
+                      formatTimeLocal(set).c_str(),
+                      formatTimeUTC(set).c_str());
+        lastTrackTime = currentMillis;
+    }
+
+    if (millis() - lastNtpSync > 3600000)
+    {
+        synchronizeTimeWithNTP();
+        lastNtpSync = millis();
+    }
+
+    static unsigned long lastTLECheck = 0;
+    if (currentMillis - lastTLECheck > 60000)
+    {
+        checkAndRefreshTLEsIfNeeded();
+        lastTLECheck = currentMillis;
+    }
+}

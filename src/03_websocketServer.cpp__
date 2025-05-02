@@ -1,0 +1,64 @@
+#include "myconfig.h"
+#include <WiFi.h>
+#include <WebSocketsServer.h>
+#include <time.h>
+
+// WebSocket server on port 81
+WebSocketsServer webSocket = WebSocketsServer(81);
+
+void connectToWiFi() {
+  WiFi.setHostname("ESP32-AzEl-Server");
+  Serial.print("Connecting to Wi-Fi: ");
+  Serial.println(WIFI_SSID);
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+
+  Serial.println("\nConnected to Wi-Fi.");
+  Serial.print("IP Address: ");
+  Serial.println(WiFi.localIP());
+
+  configTime(0, 0, "pool.ntp.org");
+  Serial.print("Waiting for NTP time");
+  while (time(nullptr) < 100000) {
+    Serial.print(".");
+    delay(500);
+  }
+  Serial.println("\nTime sync complete.");
+}
+
+void setup() {
+  Serial.begin(115200);
+  delay(4000);
+  connectToWiFi();
+
+  webSocket.begin();
+  webSocket.onEvent([](uint8_t num, WStype_t type, uint8_t * payload, size_t length) {
+    if (type == WStype_CONNECTED) {
+      Serial.printf("Client [%u] connected\n", num);
+    } else if (type == WStype_DISCONNECTED) {
+      Serial.printf("Client [%u] disconnected\n", num);
+    }
+  });
+}
+
+void loop() {
+  webSocket.loop();
+
+  static unsigned long lastSend = 0;
+  if (millis() - lastSend > 1000) {
+    lastSend = millis();
+
+    float az = random(0, 3600) / 10.0;   // 0.0 to 359.9
+    float el = random(-900, 900) / 10.0; // -90.0 to +89.9
+
+    char msg[64];
+    snprintf(msg, sizeof(msg), "{\"az\":%.1f,\"el\":%.1f}", az, el);
+
+    webSocket.broadcastTXT(msg);
+    Serial.println("Sent: " + String(msg));
+  }
+}

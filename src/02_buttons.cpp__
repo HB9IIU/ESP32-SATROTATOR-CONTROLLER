@@ -1,0 +1,129 @@
+#include <TFT_eSPI.h>
+#include <TFT_eWidget.h>
+
+TFT_eSPI tft = TFT_eSPI();
+
+const int SCREEN_WIDTH = 480;
+const int SCREEN_HEIGHT = 320;
+
+const int buttonSize = 40;
+const int topMargin = 20;
+const int marginR = 10;
+const int textMargin = 10;
+const int verticalGap = 12;
+const int labelYOffset = 14;  // manual vertical fine-tuning
+
+const int buttonCount = 5;
+ButtonWidget* radioButtons[buttonCount];
+int selectedIndex = -1;
+bool touchWasHeld = false;
+
+int labelY[buttonCount];
+char labelBuffer[buttonCount][50];
+unsigned long lastUpdate = 0;
+const unsigned long updateInterval = 2000;
+
+void drawRadioButton(int i, bool selected) {
+  radioButtons[i]->drawSmoothButton(selected, 2, TFT_BLACK);
+}
+
+
+void drawLabel(int i) {
+    char newLabel[50];
+    int az = random(-369, 370);
+    int el = random(-90, 91);
+  
+    sprintf(newLabel, "Satellite %-2d Az:%+04d El:%+03d", i + 1, az, el);
+  
+    tft.setFreeFont(&FreeMonoBold12pt7b);
+    int fontHeight = tft.fontHeight();
+    int y = labelY[i] + (buttonSize - fontHeight) / 2 + labelYOffset;
+    int x = textMargin;
+  
+    // Decide full-line color
+    uint16_t textColor = TFT_WHITE;
+    if (el > 0) textColor = TFT_GREEN;
+    else if (el < 0) textColor = TFT_RED;
+  
+    // Erase full previous label (even if unchanged)
+    tft.setTextColor(TFT_BLACK, TFT_BLACK);
+    tft.drawString(labelBuffer[i], x, y);
+  
+    // Draw new label in selected color
+    tft.setTextColor(textColor, TFT_BLACK);
+    tft.drawString(newLabel, x, y);
+  
+    // Save for next cycle
+    strcpy(labelBuffer[i], newLabel);
+  }
+  
+
+
+
+
+
+void selectRadio(int index) {
+  if (index == selectedIndex) return;
+  if (selectedIndex >= 0) drawRadioButton(selectedIndex, false);
+  selectedIndex = index;
+  drawRadioButton(selectedIndex, true);
+  Serial.printf("Selected: Satellite %d\n", index + 1);
+}
+
+void setup() {
+  Serial.begin(115200);
+  delay(500);
+
+  pinMode(TFT_BLP, OUTPUT);
+  digitalWrite(TFT_BLP, HIGH);
+
+  tft.begin();
+  tft.setRotation(1);
+  tft.fillScreen(TFT_BLACK);
+  tft.setFreeFont(&FreeMonoBold12pt7b);
+
+  for (int i = 0; i < buttonCount; i++) {
+    int x = SCREEN_WIDTH - marginR - buttonSize;
+    int y = topMargin + i * (buttonSize + verticalGap);
+    labelY[i] = y;
+
+    radioButtons[i] = new ButtonWidget(&tft);
+    radioButtons[i]->initButtonUL(x, y, buttonSize, buttonSize,
+                                  TFT_WHITE, TFT_DARKGREY, TFT_WHITE,
+                                  "", 1);
+    drawRadioButton(i, false);
+    strcpy(labelBuffer[i], "");  // initialize to empty
+    drawLabel(i);                // first draw
+  }
+
+  lastUpdate = millis();
+}
+
+void loop() {
+  uint16_t tx = 9999, ty = 9999;
+  bool touched = tft.getTouch(&tx, &ty);
+  ty = SCREEN_HEIGHT - ty;
+
+  if (touched) {
+    if (!touchWasHeld) {
+      touchWasHeld = true;
+      for (int i = 0; i < buttonCount; i++) {
+        if (radioButtons[i]->contains(tx, ty)) {
+          selectRadio(i);
+          break;
+        }
+      }
+    }
+  } else {
+    touchWasHeld = false;
+  }
+
+  if (millis() - lastUpdate >= updateInterval) {
+    lastUpdate = millis();
+    for (int i = 0; i < buttonCount; i++) {
+      drawLabel(i);
+    }
+  }
+
+  delay(10);
+}
