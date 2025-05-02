@@ -5,3 +5,6 @@
 .vscode
 .DS_Store
 src/myconfig.h
+_pginfo
+.idea
+data/.idea
