@@ -4,4 +4,4 @@
 .vscode/launch.json
 .vscode
 .DS_Store
-myconfig.h
+src/myconfig.h

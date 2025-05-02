@@ -1319,8 +1319,9 @@ void loadAndTrackSatelliteByCatalogNumber(int catalogNumber, bool shouldBroadcas
     Serial.printf("📅 UTC Time   : %02d/%02d/%04d %02d:%02d:%02.0f\n", d, m, y, h, min, sec);
 
     invjday(sat.satJd, tzOffset / 3600, false, y, m, d, h, min, sec); // Local
+    
+    /*
     Serial.printf("📅 Local Time : %02d/%02d/%04d %02d:%02d:%02.0f\n", d, m, y, h, min, sec);
-
     Serial.printf("📡 Az: %.1f°, El: %.1f°, Dist: %.1f km\n", sat.satAz, sat.satEl, sat.satDist);
     Serial.printf("🌍 Lat: %.4f°, Lon: %.4f°, Alt: %.1f km\n", sat.satLat, sat.satLon, sat.satAlt);
     Serial.printf("🚀 Radial velocity ≈ %.3f km/s\n", radialVelocity);
@@ -1328,7 +1329,9 @@ void loadAndTrackSatelliteByCatalogNumber(int catalogNumber, bool shouldBroadcas
     Serial.printf("📻 Corrected frequency: %.6f MHz\n", correctedHz / 1e6);
     Serial.printf("📻 Doppler shift: %+6.0f Hz\n", correctedHz - nominalFreqMHz * 1e6);
     Serial.printf("🔁 Setting GQRX with  freq: %.3f MHz\n", correctedHz);
-    sendFreqToGQRX(correctedHz / 1e6);
+    */
+    
+    
 
     // 🌐 Send WebSocket message if requested
     if (shouldBroadcast)
@@ -1347,6 +1350,7 @@ void loadAndTrackSatelliteByCatalogNumber(int catalogNumber, bool shouldBroadcas
         AzimuthForRotator = sat.satAz;
         ElevationForRotator = sat.satEl;
         Serial.println("📤 WebSocket sent: " + String(msg));
+        sendFreqToGQRX(correctedHz / 1e6);
     }
 
     // 🧠 Update global info array
