@@ -21,9 +21,8 @@ Sgp4 sat;
 WebSocketsServer webSocket = WebSocketsServer(81);
 AsyncWebServer server(80);
 
-unsigned long NTPlastSyncTime = 0;
-unsigned long SunMoonLastCalcTime = 0;
-unsigned long SatellitesLastCalcTime = 0;
+unsigned long lastNtpSync = 0;
+unsigned long lastTrackTime = 0;
 unsigned long lastTLECheck = 0;
 unsigned long lastRotorUpdate = 0;
 const unsigned long rotorUpdateInterval = 1000; // every 1 second
@@ -122,7 +121,7 @@ String formatTimeUTC(double hourUTC);
 String formatTimeLocal(double hourUTC);
 String formatDurationMMSS(double seconds);
 String formatDurationHHMM(double seconds);
-String formatTimeStamp(int d, int m, int y, int h, int min, int sec);
+String formatTimeStamp(int d, int m, int y, int h, int min);
 String StringFormat(const char *fmt, ...);
 #pragma endregion
 
@@ -268,9 +267,7 @@ struct SatelliteInfo
     float azAtLOS;       // 📡 Azimuth when satellite disappears (LOS)
     String passDuration; // ⏱️ Duration in MM:SS
     String timeToEvent;  // ⏳ Time until AOS or LOS in HH:MM
-    bool currentlyVisible;  
-    float sublat, sublon; 
-    float altitude;
+    char nextEventType[4]; // "AOS" or "LOS"
 
 };
 
@@ -303,7 +300,7 @@ String formatTimeStampFromJD(double jd, int tzHoursOffset = 0)
     int y, m, d, h, min;
     double sec;
     invjday(jd, tzHoursOffset, false, y, m, d, h, min, sec);
-    return formatTimeStamp(d, m, y, h, min,sec);
+    return formatTimeStamp(d, m, y, h, min);
 }
 
 double jdToHour(double jd)
@@ -1023,16 +1020,6 @@ String formatDurationHHMM(double seconds)
     snprintf(buf, sizeof(buf), "%02d:%02d", hh, mm);
     return String(buf);
 }
-String formatDurationHHMMSS(double seconds)
-{
-    int total = (int)(seconds + 0.5); // round to nearest second
-    int hh = total / 3600;
-    int mm = (total % 3600) / 60;
-    int ss = total % 60;
-    char buf[9]; // HH:MM:SS = 8 chars + null terminator
-    snprintf(buf, sizeof(buf), "%02d:%02d:%02d", hh, mm, ss);
-    return String(buf);
-}
 
 /**
  * 🕒 formatTimeStamp()
@@ -1040,20 +1027,13 @@ String formatDurationHHMMSS(double seconds)
  * Formats a full date + time (from int values) into "DD/MM/YYYY HH:MM".
  * Useful for nicely aligned logging of UTC/local AOS/TCA/LOS times.
  */
-String formatTimeStamp(int d, int m, int y, int h, int min, int sec)
+String formatTimeStamp(int d, int m, int y, int h, int min)
 {
-    /*
     char buffer[20];
     // snprintf(buffer, sizeof(buffer), "%02d/%02d/%04d %02d:%02d", d, m, y, h, min);
     snprintf(buffer, sizeof(buffer), "%02d.%02d %02d:%02d", d, m, h, min);
 
     return String(buffer);
-*/
-    char buffer[9]; // HH:MM:SS is 8 characters + null terminator
-    snprintf(buffer, sizeof(buffer), "%02d:%02d:%02d", h, min, sec);
-    return String(buffer);
-
-
 }
 
 /**
@@ -1101,18 +1081,18 @@ bool parseJsonBody(AsyncWebServerRequest *request, DynamicJsonDocument &doc, siz
 /**
  * 📡 predictNextPass()
  *
- * Computes and stores the current or next satellite pass for the given catalog number.
- * - If the satellite is currently visible, it calculates the current pass.
- * - If not, it computes the next upcoming pass.
- * - Avoids "00:00" bug by skipping stale predictions.
- * - Stores pass data in the global TrackedSatInfo[].
+ * Computes and prints the next or current satellite pass for the given catalog number.
+ * - Checks if satellite is already visible and adjusts prediction start time accordingly.
+ * - Uses TLE data from the RAM cache (TLECache[]).
+ * - Calculates AOS, TCA, LOS in both UTC and local time using the global `tzOffset`.
+ * - Computes pass duration (MM:SS) and time until AOS (or LOS if visible).
  *
  * Returns:
- *   true if a valid pass is found and stored, false otherwise.
+ *   true if a pass is found and printed, false otherwise.
  */
 bool predictNextPass(int catalogNumber)
 {
-    // Step 1: Locate satellite index
+    // Step 1: Find satellite index in RAM cache
     int satIndex = -1;
     for (int i = 0; i < numSatellitesToTrack; ++i)
     {
@@ -1133,13 +1113,13 @@ bool predictNextPass(int catalogNumber)
     String l1 = TLECache[satIndex].tle1;
     String l2 = TLECache[satIndex].tle2;
 
-    if (name.isEmpty() || l1.isEmpty() || l2.isEmpty())
+    if (name == "" || l1 == "" || l2 == "")
     {
         Serial.printf("❌ Missing TLE data for CATNR %d\n", catalogNumber);
         return false;
     }
 
-    // Step 2: Prepare predictor with TLE data
+    // Step 2: Prepare Sgp4 predictor
     char nameBuf[64], l1Buf[130], l2Buf[130];
     strncpy(nameBuf, name.c_str(), sizeof(nameBuf));
     strncpy(l1Buf, l1.c_str(), sizeof(l1Buf));
@@ -1149,7 +1129,7 @@ bool predictNextPass(int catalogNumber)
     predictor.site(OBSERVER_LATITUDE, OBSERVER_LONGITUDE, OBSERVER_ALTITUDE);
     predictor.init(nameBuf, l1Buf, l2Buf);
 
-    // Step 3: Determine visibility (lookback scan)
+    // Step 3: Determine start time for prediction
     time_t now = time(nullptr);
     time_t lookbackStart = now;
     bool satCurrentlyVisible = false;
@@ -1167,11 +1147,9 @@ bool predictNextPass(int catalogNumber)
         }
     }
 
-    // Step 4: Init prediction start time
-    time_t predictionStart = satCurrentlyVisible ? lookbackStart : now + 10;
-    predictor.initpredpoint(static_cast<unsigned long>(predictionStart), 0.0);
+    predictor.initpredpoint(static_cast<unsigned long>(lookbackStart), 0.0);
 
-    // Step 5: Predict pass
+    // Step 4: Compute next pass (could include current if visible)
     passinfo pass;
     if (!predictor.nextpass(&pass, 20))
     {
@@ -1179,66 +1157,76 @@ bool predictNextPass(int catalogNumber)
         return false;
     }
 
-    // Step 6: Time conversions
+    // Step 5: Convert AOS, TCA, LOS to human-readable times
     int y, m, d, h, min;
     double sec;
     int tz = tzOffset / 3600;
 
     invjday(pass.jdstart, 0, false, y, m, d, h, min, sec);
-    String aosUTC = formatTimeStamp(d, m, y, h, min,sec);
+    String aosUTC = formatTimeStamp(d, m, y, h, min);
     invjday(pass.jdstart, tz, false, y, m, d, h, min, sec);
-    String aosLocal = formatTimeStamp(d, m, y, h, min,sec);
+    String aosLocal = formatTimeStamp(d, m, y, h, min);
 
     invjday(pass.jdmax, 0, false, y, m, d, h, min, sec);
-    String tcaUTC = formatTimeStamp(d, m, y, h, min,sec);
+    String tcaUTC = formatTimeStamp(d, m, y, h, min);
     invjday(pass.jdmax, tz, false, y, m, d, h, min, sec);
-    String tcaLocal = formatTimeStamp(d, m, y, h, min,sec);
+    String tcaLocal = formatTimeStamp(d, m, y, h, min);
 
     invjday(pass.jdstop, 0, false, y, m, d, h, min, sec);
-    String losUTC = formatTimeStamp(d, m, y, h, min,sec);
+    String losUTC = formatTimeStamp(d, m, y, h, min);
     invjday(pass.jdstop, tz, false, y, m, d, h, min, sec);
-    String losLocal = formatTimeStamp(d, m, y, h, min,sec);
+    String losLocal = formatTimeStamp(d, m, y, h, min);
 
-    // Step 7: Duration calculations
+    // Step 6: Compute durations
     double durationSec = (pass.jdstop - pass.jdstart) * 86400.0;
-    double nowJD = now / 86400.0 + 2440587.5;
     double secondsUntilEvent = satCurrentlyVisible
-        ? (pass.jdstop - nowJD) * 86400.0
-        : (pass.jdstart - nowJD) * 86400.0;
+                                   ? (pass.jdstop - (now / 86400.0 + 2440587.5)) * 86400.0   // Until LOS
+                                   : (pass.jdstart - (now / 86400.0 + 2440587.5)) * 86400.0; // Until AOS
 
-    if (secondsUntilEvent < 5)
+    // Prevent negative duration formatting
+    if (secondsUntilEvent < 0)
         secondsUntilEvent = 0;
 
-    // Step 8: Store results
-    TrackedSatInfo[satIndex].currentlyVisible = satCurrentlyVisible;
-    TrackedSatInfo[satIndex].passDuration = formatDurationMMSS(durationSec);
-    TrackedSatInfo[satIndex].timeToEvent = formatDurationHHMMSS(secondsUntilEvent);
+    String duration = formatDurationMMSS(durationSec);
+    String timeToEvent = formatDurationHHMM(secondsUntilEvent);
+    TrackedSatInfo[satIndex].passDuration = duration;
+    TrackedSatInfo[satIndex].timeToEvent = timeToEvent;
+    if (satCurrentlyVisible)
+{
+    strncpy(TrackedSatInfo[satIndex].nextEventType, "LOS", sizeof(TrackedSatInfo[satIndex].nextEventType));
+}
+else
+{
+    strncpy(TrackedSatInfo[satIndex].nextEventType, "AOS", sizeof(TrackedSatInfo[satIndex].nextEventType));
+}
+
     TrackedSatInfo[satIndex].aosUTC = pass.jdstart;
     TrackedSatInfo[satIndex].tcaUTC = pass.jdmax;
     TrackedSatInfo[satIndex].losUTC = pass.jdstop;
     TrackedSatInfo[satIndex].maxElevation = pass.maxelevation;
-    TrackedSatInfo[satIndex].azAtAOS = pass.azstart;
-    TrackedSatInfo[satIndex].azAtLOS = pass.azstop;
 
-    // Step 9: Optional debug output
+    // Step 7: Print results
     /*
-    Serial.printf("📡 %s (%d) — %s\n", nameBuf, catalogNumber, satCurrentlyVisible ? "CURRENT PASS" : "NEXT PASS");
+    Serial.println();
+    Serial.println("📡 Next Pass Times (local / UTC):");
     Serial.printf("AOS : %s local / %s UTC  az=%.1f°\n", aosLocal.c_str(), aosUTC.c_str(), pass.azstart);
     Serial.printf("TCA : %s local / %s UTC  el=%.1f°\n", tcaLocal.c_str(), tcaUTC.c_str(), pass.maxelevation);
     Serial.printf("LOS : %s local / %s UTC  az=%.1f°\n", losLocal.c_str(), losUTC.c_str(), pass.azstop);
-    Serial.printf("⏱️  Duration     : %s\n", TrackedSatInfo[satIndex].passDuration.c_str());
-    Serial.printf("⏳ Until %s : %s\n", satCurrentlyVisible ? "LOS" : "AOS", TrackedSatInfo[satIndex].timeToEvent.c_str());
+    Serial.printf("⏱️  Duration     : %s\n", duration.c_str());
+
+    if (satCurrentlyVisible)
+    {
+        Serial.printf("⏳ Until LOS    : %s\n", timeToEvent.c_str());
+    }
+    else
+    {
+        Serial.printf("⏳ Until AOS    : %s\n", timeToEvent.c_str());
+    }
     */
-    
+    TrackedSatInfo[satIndex].azAtAOS = pass.azstart;
+    TrackedSatInfo[satIndex].azAtLOS = pass.azstop;
     return true;
 }
-
-
-
-
-
-
-
 
 /**
  * 🛰️ loadAndTrackSatelliteByCatalogNumber()
@@ -1341,7 +1329,7 @@ void loadAndTrackSatelliteByCatalogNumber(int catalogNumber, bool shouldBroadcas
     double sec;
 
     invjday(sat.satJd, 0, false, y, m, d, h, min, sec); // UTC
-    //Serial.printf("📅 UTC Time   : %02d/%02d/%04d %02d:%02d:%02.0f\n", d, m, y, h, min, sec);
+    Serial.printf("📅 UTC Time   : %02d/%02d/%04d %02d:%02d:%02.0f\n", d, m, y, h, min, sec);
 
     invjday(sat.satJd, tzOffset / 3600, false, y, m, d, h, min, sec); // Local
     
@@ -1388,10 +1376,6 @@ void loadAndTrackSatelliteByCatalogNumber(int catalogNumber, bool shouldBroadcas
         info.azimuth = sat.satAz;
         info.elevation = sat.satEl;
         info.distance = sat.satDist;
-        info.sublat = sat.satLat;
-        info.altitude = sat.satAlt;
-
-info.sublon = sat.satLon;
         info.frequencyMHz = nominalFreqMHz;
         info.correctedFreqMHz = correctedHz / 1e6;
         info.dopplerHz = correctedHz - nominalFreqMHz * 1e6;
@@ -1685,7 +1669,7 @@ void setup()
 
     printUtcAndLocalTime();
 
-    NTPlastSyncTime = millis();
+    lastNtpSync = millis();
 
     checkAndRefreshTLEsIfNeeded();
 
@@ -1779,16 +1763,6 @@ server.on("/futurepasses", HTTP_GET, [](AsyncWebServerRequest *request) {
 server.on("/future.html", HTTP_GET, [](AsyncWebServerRequest *request) {
     request->send(SPIFFS, "/future.html", "text/html");
 });
-
-server.on("/mapview.html", HTTP_GET, [](AsyncWebServerRequest *request) {
-    request->send(SPIFFS, "/mapview.html", "text/html");
-});
-
-
-
-
-
-
 // 🎯 Start tracking a satellite, the sun, or the moon
 server.on("/track", HTTP_POST,
     [](AsyncWebServerRequest *request) {
@@ -1875,9 +1849,6 @@ server.on("/satellites", HTTP_GET, [](AsyncWebServerRequest *request) {
         json += "\"azimuth\":" + String(sat.azimuth, 1) + ",";
         json += "\"elevation\":" + String(sat.elevation, 1) + ",";
         json += "\"distance\":" + String(sat.distance, 1) + ",";
-        json += "\"altitude\":" + String(sat.altitude, 1) + ",";  // ✅ NEW FIELD
-        json += "\"sublat\":" + String(sat.sublat, 4) + ",";
-        json += "\"sublon\":" + String(sat.sublon, 4) + ",";
         json += "\"frequencyMHz\":" + String(sat.frequencyMHz, 3) + ",";
         json += "\"correctedFreqMHz\":" + String(sat.correctedFreqMHz, 6) + ",";
         json += "\"dopplerHz\":" + String(sat.dopplerHz, 0) + ",";
@@ -1889,13 +1860,13 @@ server.on("/satellites", HTTP_GET, [](AsyncWebServerRequest *request) {
         json += "\"losLocal\":\"" + formatTimeStampFromJD(sat.losUTC, tzOffset / 3600) + "\",";
         json += "\"maxElevation\":" + String(sat.maxElevation, 1) + ",";
         json += "\"passDuration\":\"" + sat.passDuration + "\",";
-        json += "\"timeToEvent\":\"" + sat.timeToEvent + "\"";
+        json += "\"timeToEvent\":\"" + sat.timeToEvent + "\",";
+        json += "\"nextEvent\":\"" + String(sat.nextEventType) + "\"";
         json += "}";
     }
     json += "]";
     request->send(200, "application/json", json);
 });
-
 
 // 🌍 Return observer position and API key (for frontend maps)
 server.on("/observer", HTTP_GET, [](AsyncWebServerRequest *request) {
@@ -1995,10 +1966,10 @@ void loop()
     unsigned long currentMillis = millis();
 
     // ⏰ Periodic NTP resync
-    if (currentMillis - NTPlastSyncTime > 3600000) // 1 hour
+    if (currentMillis - lastNtpSync > 3600000) // 1 hour
     {
         synchronizeTimeWithNTP();
-        NTPlastSyncTime = millis();
+        lastNtpSync = millis();
     }
 
     // 📡 Periodic TLE check
@@ -2008,8 +1979,8 @@ void loop()
         lastTLECheck = millis();
     }
 
-    // 🌞🌙 Sun + Moon updates every 15s 
-    if (currentMillis - SunMoonLastCalcTime > 15000)
+    // 🌞🌕☀️ Sun + Moon updates every 5s + satellite tracking logic
+    if (currentMillis - lastTrackTime > 1000)
     {
         double az, el, rise, set;
 
@@ -2020,29 +1991,20 @@ void loop()
         SunMoonInfo.sunRiseUTC = rise;
         SunMoonInfo.sunSetUTC = set;
 
-        // 🌙 MOON
+        // 🌕 MOON
         getMoonAzElAndRiseSet(az, el, rise, set);
         SunMoonInfo.moonAzimuth = az;
         SunMoonInfo.moonElevation = el;
         SunMoonInfo.moonRiseUTC = rise;
         SunMoonInfo.moonSetUTC = set;
 
-        SunMoonLastCalcTime= currentMillis;
+        // 🛰️ Satellite predictions
+        trackConfiguredSatellites();
+
+        lastTrackTime = currentMillis;
 
         controlSteppers(AzimuthForRotator, ElevationForRotator);
-
     }
-
-  //   📡 Satellite updates every second
-  if (currentMillis - SatellitesLastCalcTime > 1000)
-  {
-      double az, el, rise, set;
-      // 🛰️ Satellite predictions
-      trackConfiguredSatellites();
-      SatellitesLastCalcTime = currentMillis;
-      controlSteppers(AzimuthForRotator, ElevationForRotator);
-  }
-
 
     // 🔁 Rotor feedback every N ms
     if (millis() - lastRotorUpdate > rotorUpdateInterval)
@@ -2105,6 +2067,16 @@ void loop()
 
 
 
+    static unsigned long lastTest = 0;
+    if (millis() - lastTest > 3000000000) {
+        lastTest = millis();
+    
+        // 🎯 Generate random frequency: 144.0 to 146.0 MHz
+        float testFreq = 144.0 + (rand() % 2000) / 1000.0;  // 144.000 - 145.999
+        Serial.printf("🔁 Testing GQRX with random freq: %.3f MHz\n", testFreq);
+        sendFreqToGQRX(testFreq);
+        sendDefaultGQRXSettings();
+    }
 
 
 

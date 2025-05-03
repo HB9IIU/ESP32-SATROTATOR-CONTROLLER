@@ -1,143 +1,305 @@
 <!DOCTYPE html>
 <html lang="en">
-    <head>
-        <meta charset="UTF-8"/>
-        <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
-        <title>Satellite Tracker</title>
-        <link href="favicon.ico" rel="icon" type="image/x-icon">
-        <!-- ✅ Bootstrap 5 CSS -->
-        <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-        <!-- Highcharts and dependencies -->
-        <script src="https://code.highcharts.com/highcharts.js"></script>
-        <script src="https://unpkg.com/suncalc@1.9.0/suncalc.js"></script>
-        <script src="https://code.highcharts.com/highcharts-more.js"></script>
-        <style>/* 🌑 Global Layout */body { font-family: Arial, sans-serif; background-color: #0d1117; color: #c9d1d9; margin: 0; padding: 1rem; } /* 🔘 Radio Buttons */input[type="radio"] { appearance: none; -webkit-appearance: none; width: 20px; height: 20px; border: 3px solid #f6cb3e; border-radius: 50%; background-color: transparent; outline: none; cursor: pointer; margin: 0.5rem; display: flex; align-items: center; justify-content: center; } input[type="radio"]::before { content: ""; width: 10px; height: 10px; border-radius: 50%; background-color: transparent; transition: background-color 0.2s ease; } input[type="radio"]:checked::before { background-color: #f6cb3e; } /* 🧭 Map Container */#map { width: 400px; height: 400px; border: 2px solid #989797; } /* 💳 Card Layout */.card { background-color: #161b22; padding: 0.5rem; margin: 0.3rem; border-radius: 0.4rem; box-shadow: 0 0 6px rgba(0, 0, 0, 0.3); min-width: 180px; max-width: 100%; flex: 1; } /* 📋 Label Styling */.label { font-weight: bold; color: #f6cb3e; margin-bottom: 0.5rem; } /* 🔘 Radio Alignment */.radio { float: right; } /* 🔦 Highlight Banner */.highlight { background-color: #161b22; margin-top: 1rem; padding: 1rem; font-size: 1.5rem; text-align: center; color: #f6cb3e; border-radius: 0.5rem; border: 2px solid #30363d; } /* 🛰️ Elevation Highlight */tr.above-horizon { color: #00ff88 !important; font-weight: bold; } /* 🔕 Hidden Elements */.hidden { display: none; } /* 🌕 Moon Image */#moonImage { transform: rotate(180deg); width: 195px; height: 195px; object-fit: cover; border-radius: 0.5rem; margin: auto; } .moon-image { display: flex; align-items: stretch; justify-content: center; padding: 0; } /* ☀️ Sun Chart */#sunChart { height: 240px; width: 100%; margin: 0 auto; } /* 📡 Polar Plot */#polarPlot { width: 100%; margin: 0 auto; background-color: #222;  /* Just for debugging */ transition: opacity 0.5s ease; } /* 📍 Polar Legend */#polarLegend { text-align: center; margin-top: 0.5rem; transition: opacity 0.5s ease; } /* 📊 Table Cell Alignment */table th, table td { text-align: center; }</style>
-    </head>
-    <body>
-        <div class="container-fluid">
-            <!-- Header Row -->
-            <div class="row">
-                <div class="col-md-4">
-                    <h3 class="text-start text-warning" id="localTime">Local: --:--:--</h3>
+<head>
+    <meta charset="UTF-8"/>
+    <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+    <title>Satellite Tracker</title>
+    <link href="favicon.ico" rel="icon" type="image/x-icon">
+    <!-- ✅ Bootstrap 5 CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Highcharts and dependencies -->
+    <script src="https://code.highcharts.com/highcharts.js"></script>
+    <script src="https://unpkg.com/suncalc@1.9.0/suncalc.js"></script>
+    <script src="https://code.highcharts.com/highcharts-more.js"></script>
+    <link href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" rel="stylesheet"/>
+    <style>/* 🌑 Global Layout */
+    body {
+        font-family: Arial, sans-serif;
+        background-color: #0d1117;
+        color: #c9d1d9;
+        margin: 0;
+        padding: 1rem;
+    }
+
+    /* 🔘 Radio Buttons */
+    input[type="radio"] {
+        appearance: none;
+        -webkit-appearance: none;
+        width: 20px;
+        height: 20px;
+        border: 3px solid #f6cb3e;
+        border-radius: 50%;
+        background-color: transparent;
+        outline: none;
+        cursor: pointer;
+        margin: 0.5rem;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    input[type="radio"]::before {
+        content: "";
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background-color: transparent;
+        transition: background-color 0.2s ease;
+    }
+
+    input[type="radio"]:checked::before {
+        background-color: #f6cb3e;
+    }
+
+    /* 🧭 Map Container */
+    #map {
+        width: 400px;
+        height: 400px;
+        border: 2px solid #989797;
+    }
+
+    /* 💳 Card Layout */
+    .card {
+        background-color: #161b22;
+        padding: 0.5rem;
+        margin: 0.3rem;
+        border-radius: 0.4rem;
+        box-shadow: 0 0 6px rgba(0, 0, 0, 0.3);
+        min-width: 180px;
+        max-width: 100%;
+        flex: 1;
+    }
+
+    /* 📋 Label Styling */
+    .label {
+        font-weight: bold;
+        color: #f6cb3e;
+        margin-bottom: 0.5rem;
+    }
+
+    /* 🔘 Radio Alignment */
+    .radio {
+        float: right;
+    }
+
+    /* 🔦 Highlight Banner */
+    .highlight {
+        background-color: #161b22;
+        margin-top: 1rem;
+        padding: 1rem;
+        font-size: 1.5rem;
+        text-align: center;
+        color: #f6cb3e;
+        border-radius: 0.5rem;
+        border: 2px solid #30363d;
+    }
+
+    /* 🛰️ Elevation Highlight */
+    tr.above-horizon td {
+        color: #00ff88 !important; /* Green */
+        font-weight: bold;
+    }
+
+    tr.near-event td {
+        color: #f6cb3e !important; /* Yellow */
+        font-weight: bold;
+    }
+
+    /* 🔕 Hidden Elements */
+    .hidden {
+        display: none;
+    }
+
+    /* 🌕 Moon Image */
+    #moonImage {
+        transform: rotate(180deg);
+        width: 195px;
+        height: 195px;
+        object-fit: cover;
+        border-radius: 0.5rem;
+        margin: auto;
+    }
+
+    .moon-image {
+        display: flex;
+        align-items: stretch;
+        justify-content: center;
+        padding: 0;
+    }
+
+    /* ☀️ Sun Chart */
+    #sunChart {
+        height: 240px;
+        width: 100%;
+        margin: 0 auto;
+    }
+
+    /* 📡 Polar Plot */
+    #polarPlot {
+        width: 100%;
+        margin: 0 auto;
+        background-color: #222; /* Just for debugging */
+        transition: opacity 0.5s ease;
+    }
+
+    /* 📍 Polar Legend */
+    #polarLegend {
+        text-align: center;
+        margin-top: 0.5rem;
+        transition: opacity 0.5s ease;
+    }
+
+    /* 📊 Table Cell Alignment */
+    table th, table td {
+        text-align: center;
+    }</style>
+    <style>.leaflet-control-zoom, .leaflet-control-attribution {
+        display: none !important;
+    }
+
+    .sat-label {
+        color: #ffffff;
+        font-size: 14px;
+        font-family: 'Segoe UI', sans-serif;
+        font-weight: normal;
+        text-align: center;
+        white-space: nowrap;
+        pointer-events: none;
+    }</style>
+</head>
+<body>
+<div class="container-fluid">
+    <!-- Header Row -->
+    <div class="row">
+        <div class="col-md-4">
+            <h3 class="text-start text-warning" id="localTime">Local: --:--:--</h3>
+        </div>
+        <div class="col-md-4" data-pg-collapsed>
+            <h1 class="m-0 text-center text-warning">HB9IIU Rotator Controller</h1>
+        </div>
+        <div class="col-md-4" data-pg-collapsed>
+            <h3 class="text-end text-warning" id="utcTime">UTC: --:--:--</h3>
+        </div>
+    </div>
+    <!-- Satellite Table -->
+    <div class="table-responsive mb-4">
+        <table class="table table-dark table-bordered align-middle" id="satTable">
+            <thead class="table-light">
+            <tr class="table-dark">
+                <th>Select</th>
+                <th>Name</th>
+                <th>Azimuth</th>
+                <th>Elevation</th>
+                <th>Freq (MHz)</th>
+                <th>Corrected Freq</th>
+                <th>AOS</th>
+                <th>TCA</th>
+                <th>LOS</th>
+                <th>Max El</th>
+                <th>Duration</th>
+                <th>Next Event</th>
+            </tr>
+            </thead>
+            <tbody id="satBody"></tbody>
+        </table>
+    </div>
+    <!-- Section for Sun/Moon cards and chart -->
+    <div class="row g-3 mb-4">
+        <div class="col-md-3">
+            <div id="sunChart"></div>
+        </div>
+        <div class="col-md-3" data-pg-collapsed>
+            <div class="card p-2">
+                <div class="radio">
+                    <input name="trackingTarget" type="radio" value="sun">
                 </div>
-                <div class="col-md-4" data-pg-collapsed>
-                    <h1 class="m-0 text-center text-warning">HB9IIU Rotator Controller</h1>
-                </div>
-                <div class="col-md-4" data-pg-collapsed>
-                    <h3 class="text-end text-warning" id="utcTime">UTC: --:--:--</h3>
-                </div>
-            </div>
-            <!-- Satellite Table -->
-            <div class="table-responsive mb-4">
-                <table class="table table-dark table-bordered align-middle" id="satTable">
-                    <thead class="table-light">
-                        <tr class="table-dark">
-                            <th>Select</th>
-                            <th>Name</th>
-                            <th>Azimuth</th>
-                            <th>Elevation</th>
-                            <th>Freq (MHz)</th>
-                            <th>Corrected Freq</th>
-                            <th>AOS</th>
-                            <th>TCA</th>
-                            <th>LOS</th>
-                            <th>Max El</th>
-                            <th>Duration</th>
-                            <th>Next Event</th>
-                        </tr>
-                    </thead>
-                    <tbody id="satBody"></tbody>
+                <div class="label" style="font-size: 20px;">🌞 Sun</div>
+                <table class="table table-sm table-borderless text-light">
+                    <tr>
+                        <td class="table-dark" style="text-align: left; padding-left: 15px;">Azimuth:</td>
+                        <td class="table-dark" id="sunAz">--°</td>
+                    </tr>
+                    <tr>
+                        <td class="table-dark" style="text-align: left; padding-left: 15px;">Elevation:</td>
+                        <td class="table-dark" id="sunEl">--°</td>
+                    </tr>
+                    <tr>
+                        <td class="table-dark" style="text-align: left; padding-left: 15px;">Sunrise:</td>
+                        <td class="table-dark" id="sunrise">--:--</td>
+                    </tr>
+                    <tr>
+                        <td class="table-dark" style="text-align: left; padding-left: 15px;">Sunset:</td>
+                        <td class="table-dark" id="sunset">--:--</td>
+                    </tr>
                 </table>
             </div>
-            <!-- Section for Sun/Moon cards and chart -->
-            <div class="row g-3 mb-4">
-                <div class="col-md-3">
-                    <div id="sunChart"></div>
+        </div>
+        <div class="col-md-3" data-pg-collapsed>
+            <div class="card p-2">
+                <div class="radio">
+                    <input name="trackingTarget" type="radio" value="moon">
                 </div>
-                <div class="col-md-3" data-pg-collapsed>
-                    <div class="card p-2">
-                        <div class="radio">
-                            <input name="trackingTarget" type="radio" value="sun">
-                        </div>
-                        <div class="label" style="font-size: 20px;">🌞 Sun</div>
-                        <table class="table table-sm table-borderless text-light">
-                            <tr>
-                                <td class="table-dark" style="text-align: left; padding-left: 15px;">Azimuth:</td>
-                                <td class="table-dark" id="sunAz">--°</td>
-                            </tr>
-                            <tr>
-                                <td class="table-dark" style="text-align: left; padding-left: 15px;">Elevation:</td>
-                                <td class="table-dark" id="sunEl">--°</td>
-                            </tr>
-                            <tr>
-                                <td class="table-dark" style="text-align: left; padding-left: 15px;">Sunrise:</td>
-                                <td class="table-dark" id="sunrise">--:--</td>
-                            </tr>
-                            <tr>
-                                <td class="table-dark" style="text-align: left; padding-left: 15px;">Sunset:</td>
-                                <td class="table-dark" id="sunset">--:--</td>
-                            </tr>
-                        </table>
-                    </div>
-                </div>
-                <div class="col-md-3" data-pg-collapsed>
-                    <div class="card p-2">
-                        <div class="radio">
-                            <input name="trackingTarget" type="radio" value="moon">
-                        </div>
-                        <div class="label" style="font-size: 20px;">🌙 Moon</div>
-                        <table class="table table-sm table-borderless text-light">
-                            <tr>
-                                <td class="table-dark" style="text-align: left; padding-left: 15px;">Azimuth:</td>
-                                <td class="table-dark" id="moonAz">--°</td>
-                            </tr>
-                            <tr>
-                                <td class="table-dark" style="text-align: left; padding-left: 15px;">Elevation:</td>
-                                <td class="table-dark" id="moonEl">--°</td>
-                            </tr>
-                            <tr>
-                                <td class="table-dark" style="text-align: left; padding-left: 15px;">Moonrise:</td>
-                                <td class="table-dark" id="moonrise">--:--</td>
-                            </tr>
-                            <tr>
-                                <td class="table-dark" style="text-align: left; padding-left: 15px;">Moonset:</td>
-                                <td class="table-dark" id="moonset">--:--</td>
-                            </tr>
-                        </table>
-                    </div>
-                </div>
-                <div class="col-md-3" data-pg-collapsed>
-                    <div class="card moon-image">
-                        <img alt="NASA Moon of the Hour" id="moonImage" src="">
-                    </div>
-                </div>
+                <div class="label" style="font-size: 20px;">🌙 Moon</div>
+                <table class="table table-sm table-borderless text-light">
+                    <tr>
+                        <td class="table-dark" style="text-align: left; padding-left: 15px;">Azimuth:</td>
+                        <td class="table-dark" id="moonAz">--°</td>
+                    </tr>
+                    <tr>
+                        <td class="table-dark" style="text-align: left; padding-left: 15px;">Elevation:</td>
+                        <td class="table-dark" id="moonEl">--°</td>
+                    </tr>
+                    <tr>
+                        <td class="table-dark" style="text-align: left; padding-left: 15px;">Moonrise:</td>
+                        <td class="table-dark" id="moonrise">--:--</td>
+                    </tr>
+                    <tr>
+                        <td class="table-dark" style="text-align: left; padding-left: 15px;">Moonset:</td>
+                        <td class="table-dark" id="moonset">--:--</td>
+                    </tr>
+                </table>
             </div>
-            <!-- Tracking Banner -->
-            <div class="highlight" id="trackingBanner">📡 Currently Tracking:</div>
-            <!-- Stop Tracking Section -->
-            <div class="hidden mt-4 text-center" id="stopTrackingWrapper">
-                <button class="btn btn-danger btn-lg mb-3" id="stopTrackingBtn">Stop Tracking</button>
-                <div class="row">
-                    <div class="col-md-6 d-flex justify-content-center">
-                        <div id="map"></div>
-                    </div>
-                    <div class="col-md-6">
-                        <div id="polarPlot"></div>
-                        <div class="mt-2 text-center text-light" id="polarLegend"><span style="color: #00ff00;">●
-                            AOS</span><span style="color: #f6cb3e;"> ● TCA</span><span style="color: #ff3333;"> ●
+        </div>
+        <div class="col-md-3" data-pg-collapsed>
+            <div class="card moon-image">
+                <img alt="NASA Moon of the Hour" id="moonImage" src="">
+            </div>
+        </div>
+    </div>
+    <!-- Tracking Banner -->
+    <div class="highlight" id="trackingBanner">📡 Currently Tracking:</div>
+    <!-- Stop Tracking Section -->
+    <div class="hidden mt-4 text-center" id="stopTrackingWrapper">
+        <button class="btn btn-danger btn-lg mb-3" id="stopTrackingBtn">Stop Tracking</button>
+        <div class="row">
+            <div class="col-md-6 d-flex justify-content-center">
+                <div id="map"></div>
+            </div>
+            <div class="col-md-6">
+                <div id="polarPlot"></div>
+                <div class="mt-2 text-center text-light" id="polarLegend">
+                            <span style="color: #00ff00;">●
+                            AOS</span>
+                    <span style="color: #f6cb3e;"> ● TCA</span>
+                    <span style="color: #ff3333;"> ●
                             LOS</span>
-                        </div>                                                  
-                    </div>
-                </div>
-                <div class="row justify-content-center">
-</div>
-                <div class="mt-3 fs-5 text-warning" id="rotorStatus">
-                    Rotor Position — Azimuth: <span id="rotorAz">--</span>°, Elevation: <span id="rotorEl">--</span>°
                 </div>
             </div>
         </div>
-        <!-- Scripts remain below -->
-        <script>
+        <div class="row justify-content-center">
+        </div>
+        <div class="mt-3 fs-5 text-warning" id="rotorStatus">
+            Rotor Position — Azimuth: <span id="rotorAz">--</span>°, Elevation: <span id="rotorEl">--</span>°
+        </div>
+    </div>
+    <div class="row">
+        <div class="d-flex justify-content-center align-items-center" style="height: 100vh; overflow: hidden;">
+            <div id="footprintmap" style="width: 1024px; height: 512px;"></div>
+        </div>
+    </div>
+</div>
+<!-- Scripts remain below -->
+<script>
     var latitude = 46.4668;
     var longitude = 6.8616;
 
@@ -287,7 +449,13 @@
 
         data.forEach(sat => {
             const row = document.createElement("tr");
-            if (sat.elevation > 0) row.classList.add("above-horizon");
+
+            if (sat.elevation > 10) {
+                row.classList.add("above-horizon"); // 🟢 Green
+            } else if (sat.elevation > 0) {
+                row.classList.add("near-event");    // 🟡 Yellow
+            }
+
             row.innerHTML = `
   <td><input type="radio" name="trackingTarget" value="${sat.name}"></td>
   <td class="left">${sat.name}</td>
@@ -300,12 +468,12 @@
   <td>${sat.losLocal}</td>
   <td>${sat.maxElevation.toFixed(1)}</td>
   <td>${sat.passDuration}</td>
-  <td><b>${sat.nextEvent}</b> in ${sat.timeToEvent}</td>
+  <td>${sat.timeToEvent}</td>
 `;
-
 
             tbody.appendChild(row);
         });
+
 
         if (selectedTarget) {
             const radioToCheck = document.querySelector(`input[name="trackingTarget"][value="${selectedTarget}"]`);
@@ -882,9 +1050,10 @@ Time until sunset: <b>${h}h ${m}m</b>
 
     window.onload = function () {
         // Initial triggers
+        loadSatelliteData()
         buildSunChart();
         loadSunMoonData();
-        loadSatelliteData();
+
         updateClocks();
 
         fetch('/observer')
@@ -916,5 +1085,128 @@ Time until sunset: <b>${h}h ${m}m</b>
 
 
 </script>
-    </body>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+    const EARTH_RADIUS_KM = 6371;
+    const FOOTPRINT_SEGMENTS = 180;
+    const FOOTPRINT_FILL_COLOR = '#ffd502';
+    const FOOTPRINT_FILL_OPACITY = 0.3;
+
+    const footprintmap = L.map('footprintmap', {
+        zoomControl: false,
+        attributionControl: false,
+        dragging: false,
+        scrollWheelZoom: false,
+        doubleClickZoom: false,
+        boxZoom: false,
+        keyboard: false,
+        zoomSnap: 0,          // optional, for smoother lock
+        inertia: false,       // disables momentum
+        minZoom: 2,
+        maxZoom: 2,
+        worldCopyJump: false,
+
+    }).setView([0, 0], 2);
+
+    // ✅ Limit map bounds to avoid duplicate wrap-around
+    footprintmap.setMaxBounds([
+        [-90, -180],
+        [90, 180]
+    ]);    // Use your original working tile source
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/' +
+        'World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+        attribution: 'Tiles © Esri',
+        noWrap: true
+    }).addTo(footprintmap);
+
+    function computeFootprintRadiusKm(altitudeKm) {
+        const theta = Math.acos(EARTH_RADIUS_KM / (EARTH_RADIUS_KM + altitudeKm));
+        return EARTH_RADIUS_KM * theta;
+    }
+
+    function generateFootprintCircle(lat, lon, radiusKm, segments) {
+        const points = [];
+        const rad = Math.PI / 180;
+        const deg = 180 / Math.PI;
+
+        for (let i = 0; i < segments; i++) {
+            const angle = (360 / segments) * i * rad;
+
+            const lat1 = lat * rad;
+            const lon1 = lon * rad;
+            const d = radiusKm / EARTH_RADIUS_KM;
+
+            const lat2 = Math.asin(Math.sin(lat1) * Math.cos(d) + Math.cos(lat1) * Math.sin(d) * Math.cos(angle));
+            const lon2 = lon1 + Math.atan2(Math.sin(angle) * Math.sin(d) * Math.cos(lat1), Math.cos(d) - Math.sin(lat1) * Math.sin(lat2));
+
+            points.push([lat2 * deg, lon2 * deg]);
+        }
+        return points;
+    }
+
+    const satLayers = {};
+
+    function drawOrUpdateSatellite(sat) {
+        const shortNameMatch = sat.name.match(/\(([^)]+)\)/);
+        const shortName = shortNameMatch ? shortNameMatch[1] : sat.name;
+        const key = sat.name;
+
+        const radiusKm = computeFootprintRadiusKm(sat.altitude);
+        const footprintPoints = generateFootprintCircle(sat.sublat, sat.sublon, radiusKm, FOOTPRINT_SEGMENTS);
+
+        const charWidth = 7;
+        const padding = 10;
+        const iconWidth = shortName.length * charWidth + padding;
+
+        if (satLayers[key]) {
+            // Update existing
+            satLayers[key].footprint.setLatLngs(footprintPoints);
+            satLayers[key].marker.setLatLng([sat.sublat, sat.sublon]);
+            satLayers[key].label.setLatLng([sat.sublat, sat.sublon]);
+        } else {
+            // Create new
+            const footprint = L.polygon(footprintPoints, {
+                color: FOOTPRINT_FILL_COLOR,
+                fillColor: FOOTPRINT_FILL_COLOR,
+                fillOpacity: FOOTPRINT_FILL_OPACITY,
+                weight: 1
+            }).addTo(footprintmap);
+
+            const marker = L.circleMarker([sat.sublat, sat.sublon], {
+                radius: 4,
+                color: '#ff0202',
+                weight: 1,
+                fillColor: '#f6cb3e',
+                fillOpacity: 1
+            }).addTo(footprintmap);
+
+            const label = L.marker([sat.sublat, sat.sublon], {
+                icon: L.divIcon({
+                    className: 'sat-label',
+                    html: shortName,
+                    iconSize: [iconWidth, 20],
+                    iconAnchor: [iconWidth / 2, 25]
+                })
+            }).addTo(footprintmap);
+
+            satLayers[key] = {footprint, marker, label};
+        }
+    }
+
+    function updateSatellitesForFootprintMap() {
+        fetch('http://esp32azel.local/satellites')
+            .then(response => response.json())
+            .then(data => {
+                data.forEach(drawOrUpdateSatellite);
+            })
+            .catch(error => {
+                console.error("Failed to fetch satellite data:", error);
+            });
+    }
+
+    updateSatellitesForFootprintMap(); // Initial call
+    setInterval(updateSatellitesForFootprintMap, 2500); // Refresh every 5 seconds
+</script>
+
+</body>
 </html>
