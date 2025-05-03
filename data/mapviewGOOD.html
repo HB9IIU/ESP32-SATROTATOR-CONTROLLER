@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Satellite Footprint Map</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body {
+            background-color: #0d1117;
+            color: #c9d1d9;
+        }
+        #map {
+            height: 100vh;
+            width: 100%;
+            flex: 1;
+        }
+        .map-container {
+            display: flex;
+            height: 100vh;
+        }
+        .leaflet-control-zoom,
+        .leaflet-control-attribution {
+            display: none !important;
+        }
+
+        .sat-label {
+            color: #ffffff;              /* Yellow-like text */
+            font-size: 14px;             /* Adjust size as needed */
+            font-family: 'Segoe UI', sans-serif;
+            font-weight: normal;
+            text-align: center;
+            white-space: nowrap;
+            pointer-events: none;        /* So labels don't block map interactions */
+        }
+
+
+    </style>
+</head>
+<body>
+<div class="map-container">
+    <div id="map"></div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<script>
+    const EARTH_RADIUS_KM = 6371;
+    const FOOTPRINT_SEGMENTS = 60;
+    const FOOTPRINT_FILL_COLOR = '#ffd502';
+    const FOOTPRINT_FILL_OPACITY = 0.3;
+
+    const map = L.map('map', {
+        zoomControl: false,
+        attributionControl: false,
+        dragging: false,
+        scrollWheelZoom: false,
+        doubleClickZoom: false,
+        boxZoom: false,
+        keyboard: false
+    }).setView([0, 0], 2);
+
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/' +
+        'World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+        attribution: 'Tiles © Esri'
+    }).addTo(map);
+
+    function computeFootprintRadiusKm(altitudeKm) {
+        const theta = Math.acos(EARTH_RADIUS_KM / (EARTH_RADIUS_KM + altitudeKm));
+        return EARTH_RADIUS_KM * theta;
+    }
+
+    function generateFootprintCircle(lat, lon, radiusKm, segments) {
+        const points = [];
+        const rad = Math.PI / 180;
+        const deg = 180 / Math.PI;
+
+        for (let i = 0; i < segments; i++) {
+            const angle = (360 / segments) * i * rad;
+
+            const lat1 = lat * rad;
+            const lon1 = lon * rad;
+            const d = radiusKm / EARTH_RADIUS_KM;
+
+            const lat2 = Math.asin(Math.sin(lat1) * Math.cos(d) + Math.cos(lat1) * Math.sin(d) * Math.cos(angle));
+            const lon2 = lon1 + Math.atan2(Math.sin(angle) * Math.sin(d) * Math.cos(lat1), Math.cos(d) - Math.sin(lat1) * Math.sin(lat2));
+
+            points.push([lat2 * deg, lon2 * deg]);
+        }
+        return points;
+    }
+
+    function drawSatelliteFootprint(sat) {
+        const radiusKm = computeFootprintRadiusKm(sat.altitude);
+        const footprintPoints = generateFootprintCircle(sat.sublat, sat.sublon, radiusKm, FOOTPRINT_SEGMENTS);
+
+        L.polygon(footprintPoints, {
+            color: FOOTPRINT_FILL_COLOR,
+            fillColor: FOOTPRINT_FILL_COLOR,
+            fillOpacity: FOOTPRINT_FILL_OPACITY,
+            weight: 1
+        }).addTo(map);
+
+        L.circleMarker([sat.sublat, sat.sublon], {
+            radius: 4,
+            color: '#ff0202',
+            weight: 1,
+            fillColor: '#f6cb3e',
+            fillOpacity: 1
+        }).addTo(map);
+
+        // Extract name from parentheses if available
+        const shortNameMatch = sat.name.match(/\(([^)]+)\)/);
+        const shortName = shortNameMatch ? shortNameMatch[1] : sat.name;
+
+        // Estimate icon width based on text length
+        const charWidth = 7; // Approximate average char width in pixels
+        const padding = 10;  // Extra padding for centering
+        const iconWidth = shortName.length * charWidth + padding;
+
+        const label = L.marker([sat.sublat, sat.sublon], {
+            icon: L.divIcon({
+                className: 'sat-label',
+                html: shortName,
+                iconSize: [iconWidth, 20],
+                iconAnchor: [iconWidth / 2, 25] // Center horizontally
+            })
+        }).addTo(map);
+    }
+
+    fetch('http://esp32azel.local/satellites')
+        .then(response => response.json())
+        .then(data => {
+            data.forEach(drawSatelliteFootprint);
+        })
+        .catch(error => {
+            console.error("Failed to fetch satellite data:", error);
+        });
+</script>
+
+</body>
+</html>

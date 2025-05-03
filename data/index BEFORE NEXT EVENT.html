@@ -288,6 +288,7 @@
         data.forEach(sat => {
             const row = document.createElement("tr");
             if (sat.elevation > 0) row.classList.add("above-horizon");
+
             row.innerHTML = `
   <td><input type="radio" name="trackingTarget" value="${sat.name}"></td>
   <td class="left">${sat.name}</td>
@@ -300,9 +301,8 @@
   <td>${sat.losLocal}</td>
   <td>${sat.maxElevation.toFixed(1)}</td>
   <td>${sat.passDuration}</td>
-  <td><b>${sat.nextEvent}</b> in ${sat.timeToEvent}</td>
+  <td>${sat.timeToEvent}</td>
 `;
-
 
             tbody.appendChild(row);
         });
