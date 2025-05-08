@@ -1,72 +1,55 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Upcoming Satellite Passes</title>
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
-  <style>
-    body {
-      background-color: #1e1e1e;
-      color: #f0f0f0;
-      font-family: 'Segoe UI', sans-serif;
-      padding: 2rem;
-    }
+    <head>
+        <meta charset="UTF-8"/>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+        <title>Upcoming Satellite Passes</title>
+        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+        <style>body { background-color: #1e1e1e; color: #f0f0f0; font-family: 'Segoe UI', sans-serif; padding: 2rem; } .table thead { background-color: #2c2c2c; } .table th { cursor: pointer; user-select: none; } #passesTable tbody tr.high-elev td { background-color: #204e36 !important; } #passesTable tbody tr.medium-elev td { background-color: #003f5c !important; } #passesTable tbody tr.low-elev td { background-color: #444444 !important; } #passesTable tbody tr.very-low td { background-color: #705700 !important; } .centered td:not(:first-child), th:not(:first-child) { text-align: center; } .toggle-container { margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem; }</style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="row" data-pg-collapsed>
+                <div class="col-md-4 d-flex align-items-center">
+                    <h3 class="text-start text-warning" id="localTime">Local: --:--:--</h3>
+                </div>
+                <div class="col-md-4 d-flex align-items-center justify-content-center" data-pg-collapsed>
+                    <h1 class="m-0 text-center text-warning">HB9IIU SatAlign</h1>
+                </div>
+                <div class="col-md-4 d-flex align-items-center justify-content-end" data-pg-collapsed>
+                    <h3 class="text-end text-warning" id="utcTime">UTC: --:--:--</h3>
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-md-6">                      
 
-    .table thead {
-      background-color: #2c2c2c;
-    }
-
-    .table th {
-      cursor: pointer;
-      user-select: none;
-    }
-
-    #passesTable tbody tr.high-elev td    { background-color: #204e36 !important; }
-#passesTable tbody tr.medium-elev td  { background-color: #003f5c !important; }
-#passesTable tbody tr.low-elev td     { background-color: #444444 !important; }
-#passesTable tbody tr.very-low td     { background-color: #705700 !important; }
-
-
-
-    .centered td:not(:first-child), th:not(:first-child) {
-      text-align: center;
-    }
-
-    .toggle-container {
-      margin-bottom: 1rem;
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-    }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <div class="toggle-container">
-      <input class="form-check-input" type="checkbox" id="toggleUTC">
-      <label class="form-check-label" for="toggleUTC">Show UTC time</label>
-    </div>
-
-    <div class="table-responsive">
-      <table class="table table-dark table-bordered table-hover centered" id="passesTable">
-        <thead>
-          <tr>
-            <th onclick="sortTable(0)">Satellite</th>
-            <th onclick="sortTable(1)">Date</th>
-            <th onclick="sortTable(2)">AOS</th>
-            <th onclick="sortTable(3)">TCA</th>
-            <th onclick="sortTable(4)">LOS</th>
-            <th onclick="sortTable(5)">Max Elev (°)</th>
-            <th onclick="sortTable(6)">Duration</th>
-          </tr>
-        </thead>
-        <tbody id="passesTableBody"></tbody>
-      </table>
-    </div>
-  </div>
-
-  <script>
+                    <div class="toggle-container">
+                        <input class="form-check-input" type="checkbox" id="toggleUTC">
+                        <label class="form-check-label" for="toggleUTC">Show UTC time</label>
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <h5 style="text-align: right;" class="text-white"><a href="/" class="link-light">Home</a></h5>                      
+                </div>
+            </div>
+            <div class="table-responsive">
+                <table class="table table-dark table-bordered table-hover centered" id="passesTable">
+                    <thead>
+                        <tr>
+                            <th onclick="sortTable(0)">Satellite</th>
+                            <th onclick="sortTable(1)">Date</th>
+                            <th onclick="sortTable(2)">AOS</th>
+                            <th onclick="sortTable(3)">TCA</th>
+                            <th onclick="sortTable(4)">LOS</th>
+                            <th onclick="sortTable(5)">Max Elev (°)</th>
+                            <th onclick="sortTable(6)">Duration</th>
+                        </tr>
+                    </thead>
+                    <tbody id="passesTableBody"></tbody>
+                </table>
+            </div>
+        </div>
+        <script>
     let useUTC = false;
     let tzOffset = 0;
     let passes = [];
@@ -179,6 +162,20 @@
     }
 
     fetchAndDisplayPasses();
+
+    function updateClocks() {
+        const now = new Date();
+        const utcStr = now.toUTCString().split(" ")[4];
+        const localStr = now.toLocaleTimeString('en-GB', {hour12: false});
+        document.getElementById("utcTime").textContent = `UTC: ${utcStr}`;
+        document.getElementById("localTime").textContent = `Local: ${localStr}`;
+    }
+
+    setInterval(() => {
+        updateClocks();
+    }, 1000);
+
+
   </script>
-</body>
+    </body>
 </html>

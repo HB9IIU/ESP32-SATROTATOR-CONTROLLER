@@ -1,166 +1,304 @@
 <!DOCTYPE html>
 <html lang="en">
-    <head>
-        <meta charset="UTF-8"/>
-        <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
-        <title>Satellite Tracker</title>
-        <link href="favicon.ico" rel="icon" type="image/x-icon">
-        <!-- ✅ Bootstrap 5 CSS -->
-        <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-        <!-- Highcharts and dependencies -->
-        <script src="https://code.highcharts.com/highcharts.js"></script>
-        <script src="https://unpkg.com/suncalc@1.9.0/suncalc.js"></script>
-        <script src="https://code.highcharts.com/highcharts-more.js"></script>
-        <link href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" rel="stylesheet"/>
-        <style>/* 🌑 Global Layout */body { font-family: Arial, sans-serif; background-color: #0d1117; color: #c9d1d9; margin: 0; padding: 1rem; } /* 🔘 Radio Buttons */input[type="radio"] { appearance: none; -webkit-appearance: none; width: 20px; height: 20px; border: 3px solid #f6cb3e; border-radius: 50%; background-color: transparent; outline: none; cursor: pointer; margin: 0.5rem; display: flex; align-items: center; justify-content: center; } input[type="radio"]::before { content: ""; width: 10px; height: 10px; border-radius: 50%; background-color: transparent; transition: background-color 0.2s ease; } input[type="radio"]:checked::before { background-color: #f6cb3e; } /* 🧭 Map Container */#map { width: 400px; height: 400px; border: 2px solid #989797; } /* 💳 Card Layout */.card { background-color: #161b22; padding: 0.5rem; margin: 0.3rem; border-radius: 0.4rem; box-shadow: 0 0 6px rgba(0, 0, 0, 0.3); min-width: 180px; max-width: 100%; flex: 1; } /* 📋 Label Styling */.label { font-weight: bold; color: #f6cb3e; margin-bottom: 0.5rem; } /* 🔘 Radio Alignment */.radio { float: right; } /* 🔦 Highlight Banner */.highlight { background-color: #161b22; margin-top: 1rem; padding: 1rem; font-size: 1.5rem; text-align: center; color: #f6cb3e; border-radius: 0.5rem; border: 2px solid #30363d; } /* 🛰️ Elevation Highlight */tr.above-horizon td { color: #00ff88 !important;  /* Green */ font-weight: bold; } tr.near-event td { color: #f6cb3e !important;  /* Yellow */ font-weight: bold; } /* 🔕 Hidden Elements */.hidden { display: none; } /* 🌕 Moon Image */#moonImage { transform: rotate(180deg); width: 195px; height: 195px; object-fit: cover; border-radius: 0.5rem; margin: auto; } .moon-image { display: flex; align-items: stretch; justify-content: center; padding: 0; } /* ☀️ Sun Chart */#sunChart { height: 240px; width: 100%; margin: 0 auto; } /* 📡 Polar Plot */#polarPlot { width: 100%; margin: 0 auto; background-color: #222;  /* Just for debugging */ transition: opacity 0.5s ease; } /* 📍 Polar Legend */#polarLegend { text-align: center; margin-top: 0.5rem; transition: opacity 0.5s ease; } /* 📊 Table Cell Alignment */table th, table td { text-align: center; }</style>
-        <style>.leaflet-control-zoom, .leaflet-control-attribution { display: none !important; } .sat-label { color: #ffffff; font-size: 14px; font-family: 'Segoe UI', sans-serif; font-weight: normal; text-align: center; white-space: nowrap; pointer-events: none; }</style>
-    </head>
-    <body>
-        <div class="container-fluid">
-            <!-- Header Row -->
-            <div class="row" data-pg-collapsed>
-                <div class="col-md-4 d-flex align-items-center">
-                    <h3 class="text-start text-warning" id="localTime">Local: --:--:--</h3>
+<head>
+    <meta charset="UTF-8"/>
+    <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+    <title>Satellite Tracker</title>
+    <link href="favicon.ico" rel="icon" type="image/x-icon">
+    <!-- ✅ Bootstrap 5 CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Highcharts and dependencies -->
+    <script src="https://code.highcharts.com/highcharts.js"></script>
+    <script src="https://unpkg.com/suncalc@1.9.0/suncalc.js"></script>
+    <script src="https://code.highcharts.com/highcharts-more.js"></script>
+    <link href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" rel="stylesheet"/>
+    <style>/* 🌑 Global Layout */
+    body {
+        font-family: Arial, sans-serif;
+        background-color: #0d1117;
+        color: #c9d1d9;
+        margin: 0;
+        padding: 1rem;
+    }
+
+    /* 🔘 Radio Buttons */
+    input[type="radio"] {
+        appearance: none;
+        -webkit-appearance: none;
+        width: 20px;
+        height: 20px;
+        border: 3px solid #f6cb3e;
+        border-radius: 50%;
+        background-color: transparent;
+        outline: none;
+        cursor: pointer;
+        margin: 0.5rem;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    input[type="radio"]::before {
+        content: "";
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background-color: transparent;
+        transition: background-color 0.2s ease;
+    }
+
+    input[type="radio"]:checked::before {
+        background-color: #f6cb3e;
+    }
+
+    /* 🧭 Map Container */
+    #map {
+        width: 400px;
+        height: 400px;
+        border: 2px solid #989797;
+    }
+
+    /* 💳 Card Layout */
+    .card {
+        background-color: #161b22;
+        padding: 0.5rem;
+        margin: 0.3rem;
+        border-radius: 0.4rem;
+        box-shadow: 0 0 6px rgba(0, 0, 0, 0.3);
+        min-width: 180px;
+        max-width: 100%;
+        flex: 1;
+    }
+
+    /* 📋 Label Styling */
+    .label {
+        font-weight: bold;
+        color: #f6cb3e;
+        margin-bottom: 0.5rem;
+    }
+
+    /* 🔘 Radio Alignment */
+    .radio {
+        float: right;
+    }
+
+    /* 🔦 Highlight Banner */
+    .highlight {
+        background-color: #161b22;
+        margin-top: 1rem;
+        padding: 1rem;
+        font-size: 1.5rem;
+        text-align: center;
+        color: #f6cb3e;
+        border-radius: 0.5rem;
+        border: 2px solid #30363d;
+    }
+
+    /* 🛰️ Elevation Highlight */
+    tr.above-horizon td {
+        color: #00ff88 !important; /* Green */
+        font-weight: bold;
+    }
+
+    tr.near-event td {
+        color: #f6cb3e !important; /* Yellow */
+        font-weight: bold;
+    }
+
+    /* 🔕 Hidden Elements */
+    .hidden {
+        display: none;
+    }
+
+    /* 🌕 Moon Image */
+    #moonImage {
+        transform: rotate(180deg);
+        width: 195px;
+        height: 195px;
+        object-fit: cover;
+        border-radius: 0.5rem;
+        margin: auto;
+    }
+
+    .moon-image {
+        display: flex;
+        align-items: stretch;
+        justify-content: center;
+        padding: 0;
+    }
+
+    /* ☀️ Sun Chart */
+    #sunChart {
+        height: 240px;
+        width: 100%;
+        margin: 0 auto;
+    }
+
+    /* 📡 Polar Plot */
+    #polarPlot {
+        width: 100%;
+        margin: 0 auto;
+        background-color: #222; /* Just for debugging */
+        transition: opacity 0.5s ease;
+    }
+
+    /* 📍 Polar Legend */
+    #polarLegend {
+        text-align: center;
+        margin-top: 0.5rem;
+        transition: opacity 0.5s ease;
+    }
+
+    /* 📊 Table Cell Alignment */
+    table th, table td {
+        text-align: center;
+    }</style>
+    <style>.leaflet-control-zoom, .leaflet-control-attribution {
+        display: none !important;
+    }
+
+    .sat-label {
+        color: #ffffff;
+        font-size: 14px;
+        font-family: 'Segoe UI', sans-serif;
+        font-weight: normal;
+        text-align: center;
+        white-space: nowrap;
+        pointer-events: none;
+    }</style>
+</head>
+<body>
+<div class="container-fluid">
+    <!-- Header Row -->
+    <div class="row" data-pg-collapsed>
+        <div class="col-md-4 d-flex align-items-center">
+            <h3 class="text-start text-warning" id="localTime">Local: --:--:--</h3>
+        </div>
+        <div class="col-md-4 d-flex align-items-center justify-content-center" data-pg-collapsed>
+            <h1 class="m-0 text-center text-warning">HB9IIU SatAlign</h1>
+        </div>
+        <div class="col-md-4 d-flex align-items-center justify-content-end" data-pg-collapsed>
+            <h3 class="text-end text-warning" id="utcTime">UTC: --:--:--</h3>
+        </div>
+    </div>
+    <!-- Satellite Table -->
+    <div class="table-responsive mb-4" data-pg-collapsed>
+        <table class="table table-dark table-bordered align-middle" id="satTable">
+            <thead class="table-light">
+            <tr class="table-dark">
+                <th>Select</th>
+                <th>Name</th>
+                <th>Azimuth</th>
+                <th>Elevation</th>
+                <th>Freq (MHz)</th>
+                <th>Corrected Freq</th>
+                <th>AOS</th>
+                <th>TCA</th>
+                <th>LOS</th>
+                <th>Max El</th>
+                <th>Duration</th>
+                <th>Next Event</th>
+            </tr>
+            </thead>
+            <tbody id="satBody"></tbody>
+        </table>
+    </div>
+    <!-- Section for Sun/Moon cards and chart -->
+    <div class="row g-3 mb-4">
+        <div class="col-md-3">
+            <div id="sunChart"></div>
+        </div>
+        <div class="col-md-3" data-pg-collapsed>
+            <div class="card p-2">
+                <div class="radio">
+                    <input name="trackingTarget" type="radio" value="sun">
                 </div>
-                <div class="col-md-4 d-flex align-items-center justify-content-center" data-pg-collapsed>
-                    <h1 class="m-0 text-center text-warning">HB9IIU SatAlign</h1>
-                </div>
-                <div class="col-md-4 d-flex align-items-center justify-content-end" data-pg-collapsed>
-                    <h3 class="text-end text-warning" id="utcTime">UTC: --:--:--</h3>
-                </div>
-            </div>
-            <!-- Satellite Table -->
-            <div class="mb-4 table-responsive" data-pg-collapsed>
-                <table class="table table-dark table-bordered align-middle" id="satTable">
-                    <thead class="table-light">
-                        <tr class="table-dark">
-                            <th>Select</th>
-                            <th>Name</th>
-                            <th>Azimuth</th>
-                            <th>Elevation</th>
-                            <th>Freq (MHz)</th>
-                            <th>Corrected Freq</th>
-                            <th>AOS</th>
-                            <th>TCA</th>
-                            <th>LOS</th>
-                            <th>Max El</th>
-                            <th>Duration</th>
-                            <th><a href="future.html" target="_parent" class="link-light">Next Event</a></th>
-                        </tr>
-                    </thead>
-                    <tbody id="satBody"></tbody>
+                <div class="label" style="font-size: 20px;">🌞 Sun</div>
+                <table class="table table-sm table-borderless text-light">
+                    <tr>
+                        <td class="table-dark" style="text-align: left; padding-left: 15px;">Azimuth:</td>
+                        <td class="table-dark" id="sunAz">--°</td>
+                    </tr>
+                    <tr>
+                        <td class="table-dark" style="text-align: left; padding-left: 15px;">Elevation:</td>
+                        <td class="table-dark" id="sunEl">--°</td>
+                    </tr>
+                    <tr>
+                        <td class="table-dark" style="text-align: left; padding-left: 15px;">Sunrise:</td>
+                        <td class="table-dark" id="sunrise">--:--</td>
+                    </tr>
+                    <tr>
+                        <td class="table-dark" style="text-align: left; padding-left: 15px;">Sunset:</td>
+                        <td class="table-dark" id="sunset">--:--</td>
+                    </tr>
                 </table>
             </div>
-            <!-- Section for Sun/Moon cards and chart -->
-            <div class="row g-3 mb-4">
-                <div class="col-md-3">
-                    <div id="sunChart"></div>
+        </div>
+        <div class="col-md-3" data-pg-collapsed>
+            <div class="card p-2">
+                <div class="radio">
+                    <input name="trackingTarget" type="radio" value="moon">
                 </div>
-                <div class="col-md-3">
-                    <div class="card p-2">
-                        <div class="d-flex align-items-center mb-2">
-                            <input name="trackingTarget" type="radio" value="sun" class="me-2">
-                            <div class="label" style="font-size: 20px; margin-left: 10px;">🌞 Sun</div>
-                        </div>
-                        <table class="table table-sm table-borderless text-light">
-                            <tr>
-                                <td class="table-dark" style="text-align: left; padding-left: 15px;">Azimuth:</td>
-                                <td class="table-dark" id="sunAz">--°</td>
-                            </tr>
-                            <tr>
-                                <td class="table-dark" style="text-align: left; padding-left: 15px;">Elevation:</td>
-                                <td class="table-dark" id="sunEl">--°</td>
-                            </tr>
-                            <tr>
-                                <td class="table-dark" style="text-align: left; padding-left: 15px;">Sunrise:</td>
-                                <td class="table-dark" id="sunrise">--:--</td>
-                            </tr>
-                            <tr>
-                                <td class="table-dark" style="text-align: left; padding-left: 15px;">Sunset:</td>
-                                <td class="table-dark" id="sunset">--:--</td>
-                            </tr>
-                        </table>
-                    </div>
-                </div>
-                <div class="col-md-3" data-pg-collapsed>
-                    <div class="card p-2">
-                        <div class="d-flex align-items-center mb-2">
-                            <input name="trackingTarget" type="radio" value="moon" class="me-2">
-                            <div class="label" style="font-size: 20px; margin-left: 10px;">🌙 Moon</div>
-                        </div>
-                        <table class="table table-sm table-borderless text-light">
-                            <tr>
-                                <td class="table-dark" style="text-align: left; padding-left: 15px;">Azimuth:</td>
-                                <td class="table-dark" id="moonAz">--°</td>
-                            </tr>
-                            <tr>
-                                <td class="table-dark" style="text-align: left; padding-left: 15px;">Elevation:</td>
-                                <td class="table-dark" id="moonEl">--°</td>
-                            </tr>
-                            <tr>
-                                <td class="table-dark" style="text-align: left; padding-left: 15px;">Moonrise:</td>
-                                <td class="table-dark" id="moonrise">--:--</td>
-                            </tr>
-                            <tr>
-                                <td class="table-dark" style="text-align: left; padding-left: 15px;">Moonset:</td>
-                                <td class="table-dark" id="moonset">--:--</td>
-                            </tr>
-                        </table>
-                    </div>
-                </div>
-                <div class="col-md-3" data-pg-collapsed>
-                    <div class="card moon-image">
-                        <img alt="NASA Moon of the Hour" id="moonImage" src="">
-                    </div>
-                </div>
+                <div class="label" style="font-size: 20px;">🌙 Moon</div>
+                <table class="table table-sm table-borderless text-light">
+                    <tr>
+                        <td class="table-dark" style="text-align: left; padding-left: 15px;">Azimuth:</td>
+                        <td class="table-dark" id="moonAz">--°</td>
+                    </tr>
+                    <tr>
+                        <td class="table-dark" style="text-align: left; padding-left: 15px;">Elevation:</td>
+                        <td class="table-dark" id="moonEl">--°</td>
+                    </tr>
+                    <tr>
+                        <td class="table-dark" style="text-align: left; padding-left: 15px;">Moonrise:</td>
+                        <td class="table-dark" id="moonrise">--:--</td>
+                    </tr>
+                    <tr>
+                        <td class="table-dark" style="text-align: left; padding-left: 15px;">Moonset:</td>
+                        <td class="table-dark" id="moonset">--:--</td>
+                    </tr>
+                </table>
             </div>
-            <!-- Tracking Banner -->
-            <div class="highlight" id="trackingBanner">📡 Currently Tracking:</div>
-            <!-- Stop Tracking Section -->
-            <div class=" mt-4 text-center" id="stopTrackingWrapper">
-                <div class="row">
-                    <div class="col-md-3"> 
-</div>
-                    <div class="col-md-3"> 
-                        <button class="btn btn-danger btn-lg mb-3" id="stopTrackingBtn" style="width: 200px;">Stop Tracking</button>
-                    </div>
-                    <div class="col-md-3"> 
-                        <button class="btn btn-lg btn-success mb-3" id="parkBtn" style="width: 200px;">Park</button>
-                    </div>
-                    <div class="col-md-3"> 
-</div>
-                </div>
-                <div class="row">
-                    <div class="col-md-6 d-flex justify-content-center">
-                        <div id="map"></div>
-                    </div>
-                    <div class="col-md-6">
-                        <div id="polarPlot"></div>
-                        <div class="mt-2 text-center text-light" id="polarLegend">
-                            <span style="color: #00ff00;">●
-                            AOS</span>
-                            <span style="color: #f6cb3e;"> ● TCA</span>
-                            <span style="color: #ff3333;"> ●
+        </div>
+        <div class="col-md-3" data-pg-collapsed>
+            <div class="card moon-image">
+                <img alt="NASA Moon of the Hour" id="moonImage" src="">
+            </div>
+        </div>
+    </div>
+    <!-- Tracking Banner -->
+    <div class="highlight" id="trackingBanner">📡 Currently Tracking:</div>
+    <!-- Stop Tracking Section -->
+    <div class="hidden mt-4 text-center" id="stopTrackingWrapper">
+        <button class="btn btn-danger btn-lg mb-3" id="stopTrackingBtn">Stop Tracking</button>
+        <div class="row">
+            <div class="col-md-6 d-flex justify-content-center">
+                <div id="map"></div>
+            </div>
+            <div class="col-md-6">
+                <div id="polarPlot"></div>
+                <div class="mt-2 text-center text-light" id="polarLegend"><span style="color: #00ff00;">●
+                            AOS</span><span style="color: #f6cb3e;"> ● TCA</span><span style="color: #ff3333;"> ●
                             LOS</span>
-                        </div>
-                    </div>
-                </div>
-                <div class="row justify-content-center">
-</div>
-                <div class="mt-3 fs-5 text-warning" id="rotorStatus">
-                    Rotor Position — Azimuth: <span id="rotorAz">--</span>°, Elevation: <span id="rotorEl">--</span>°
-                </div>
-            </div>
-            <div class="row" style="margin-top: 20px;">
-                <div class="col-md-12">
-                    <div class="d-flex justify-content-center">
-                        <div id="footprintmap" style="width: 1024px; height: 512px;"></div>
-                    </div>
                 </div>
             </div>
         </div>
-        <!-- Scripts remain below -->
-        <script>
+        <div class="row justify-content-center">
+        </div>
+        <div class="mt-3 fs-5 text-warning" id="rotorStatus">
+            Rotor Position — Azimuth: <span id="rotorAz">--</span>°, Elevation: <span id="rotorEl">--</span>°
+        </div>
+    </div>
+    <div class="row" style="margin-top: 20px;">
+        <div class="col-md-12">
+            <div class="d-flex justify-content-center">
+                <div id="footprintmap" style="width: 1024px; height: 512px;"></div>
+            </div>
+        </div>
+    </div>
+</div>
+<!-- Scripts remain below -->
+<script>
     var latitude = 0;
     var longitude = 0;
 
@@ -276,21 +414,6 @@
         selectedTarget = null;
         document.querySelectorAll('input[name="trackingTarget"]').forEach(r => r.checked = false);
         fetch("/track", {
-            method: "POST",
-            headers: {"Content-Type": "application/json"},
-            body: JSON.stringify({target: ""})
-        }).then(res => {
-            if (res.ok) {
-                banner.innerHTML = "📡 Currently Tracking: --";
-                stopWrapper.classList.add("hidden");
-
-            }
-        });
-    });
-    document.getElementById("parkBtn").addEventListener("click", () => {
-        selectedTarget = null;
-        document.querySelectorAll('input[name="trackingTarget"]').forEach(r => r.checked = false);
-        fetch("/homing", {
             method: "POST",
             headers: {"Content-Type": "application/json"},
             body: JSON.stringify({target: ""})
@@ -465,9 +588,8 @@ Time until sunset: <b>${h}h ${m}m</b>
                             fontSize: '24px'
                         },
                         align: 'center',
-                        //verticalAlign: 'middle',
-                        //y: 12,
-                        //x: -12
+                        verticalAlign: 'middle',
+                        y: 0
                     }
                 },
                 {
@@ -925,6 +1047,11 @@ Time until sunset: <b>${h}h ${m}m</b>
     }
 
     window.onload = function () {
+        // Call functions that do NOT depend on observer location
+        loadSatelliteData();
+        buildSunChart();
+        loadSunMoonData();
+        updateClocks();
 
         // Then fetch observer location
         fetch('/observer')
@@ -937,7 +1064,7 @@ Time until sunset: <b>${h}h ${m}m</b>
                 console.log("Observer Latitude:", latitude);
                 console.log("Observer Longitude:", longitude);
                 console.log("Google Maps API Key:", mapsApiKey);
-                buildSunChart();
+
                 // ✅ Draw home circle on Leaflet footprint map
                 const homeCircle = L.circle([latitude, longitude], {
                     color: '#00aaff',
@@ -970,13 +1097,6 @@ Time until sunset: <b>${h}h ${m}m</b>
                 document.head.appendChild(script);
             })
             .catch(error => console.error('Error fetching observer data:', error));
-        // Call functions that do NOT depend on observer location
-        loadSatelliteData();
-
-        loadSunMoonData();
-        updateClocks();
-
-
     };
 
 
@@ -995,8 +1115,8 @@ Time until sunset: <b>${h}h ${m}m</b>
 
 
 </script>
-        <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-        <script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
     const EARTH_RADIUS_KM = 6371;
     const FOOTPRINT_SEGMENTS = 180;
     const FOOTPRINT_FILL_COLOR = '#ffd502';
@@ -1117,5 +1237,5 @@ Time until sunset: <b>${h}h ${m}m</b>
     updateSatellitesForFootprintMap(); // Initial call
     setInterval(updateSatellitesForFootprintMap, 15000); // Refresh every 5 seconds
 </script>
-    </body>
+</body>
 </html>

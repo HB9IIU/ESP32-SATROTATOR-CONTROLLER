@@ -28,6 +28,9 @@ unsigned long lastTLECheck = 0;
 unsigned long lastRotorUpdate = 0;
 const unsigned long rotorUpdateInterval = 1000; // every 1 second
 int tzOffset;
+float AzimuthForRotator = 0;
+float ElevationForRotator = 0;
+
 const int numSatellitesToTrack = sizeof(satellitesToTrack) / sizeof(satellitesToTrack[0]);
 /**
  * @brief Index of the currently tracked satellite in TrackedSatInfo[]
@@ -50,7 +53,6 @@ struct PassPoint
     float elevation; ///< Elevation in degrees (0–90)
 };
 
-
 struct SatPassInfo {
     int catnr;
     char satName[32];
@@ -62,9 +64,6 @@ struct SatPassInfo {
 };
 SatPassInfo futurePasses[numSatellitesToTrack][10];  // 10 passes max per satellite
 int passCount[numSatellitesToTrack] = {0};  // How many passes are filled per satellite
-
-
-
 
 /**
  * @brief Holds the current satellite pass path sampled every ~15 seconds.
@@ -128,9 +127,6 @@ String StringFormat(const char *fmt, ...);
 
 // make nice
 void controlSteppers(float azi, float ele);
-
-float AzimuthForRotator = 0;
-float ElevationForRotator = 0;
 
 /**
  * @brief Lists the files stored in SPIFFS and prints the usage percentage of the flash memory.
@@ -315,7 +311,6 @@ double jdToHour(double jd)
 // FOR SUN AND MOON
 
 double getJulianDate();
-
 const double DEG2RAD = PI / 180.0;
 const double RAD2DEG = 180.0 / PI;
 
@@ -1149,33 +1144,51 @@ bool predictNextPass(int catalogNumber)
     predictor.site(OBSERVER_LATITUDE, OBSERVER_LONGITUDE, OBSERVER_ALTITUDE);
     predictor.init(nameBuf, l1Buf, l2Buf);
 
-    // Step 3: Determine visibility (lookback scan)
+    // Step 3: Get current time
     time_t now = time(nullptr);
-    time_t lookbackStart = now;
-    bool satCurrentlyVisible = false;
+    bool satCurrentlyVisible = TrackedSatInfo[satIndex].currentlyVisible;
 
-    const int maxLookbackMinutes = 20;
-    for (int i = maxLookbackMinutes; i >= 0; --i)
+    // Step 4: Start prediction from adjusted time
+    time_t predictionStart = satCurrentlyVisible ? (now - 60 * 60) : now;
+    predictor.initpredpoint(static_cast<unsigned long>(predictionStart), 0.0);
+
+    passinfo pass;
+    bool foundPass = false;
+    int attempts = 0;
+    const int maxAttempts = 10;
+
+    // Step 5: Search for a valid pass
+    while (!foundPass && attempts < maxAttempts)
     {
-        time_t t = now - i * 60;
-        predictor.findsat(static_cast<unsigned long>(t));
-        if (predictor.satEl > 0)
+        if (!predictor.nextpass(&pass, 20)) // search 20 minutes ahead
         {
-            satCurrentlyVisible = true;
-            lookbackStart = t;
-            break;
+            Serial.printf("❌ Prediction failed for %s (CATNR %d), trying again...\n", nameBuf, catalogNumber);
+            now += 20 * 60;
+            predictor.initpredpoint(static_cast<unsigned long>(now), 0.0);
+            attempts++;
+            continue;
+        }
+
+        double nowJD = now / 86400.0 + 2440587.5;
+        double aosJD = pass.jdstart;
+        double losJD = pass.jdstop;
+
+        if ((satCurrentlyVisible && aosJD <= nowJD && losJD > nowJD) ||
+            (!satCurrentlyVisible && aosJD > nowJD))
+        {
+            foundPass = true;
+        }
+        else
+        {
+            now += 20 * 60;
+            predictor.initpredpoint(static_cast<unsigned long>(now), 0.0);
+            attempts++;
         }
     }
 
-    // Step 4: Init prediction start time
-    time_t predictionStart = satCurrentlyVisible ? lookbackStart : now + 10;
-    predictor.initpredpoint(static_cast<unsigned long>(predictionStart), 0.0);
-
-    // Step 5: Predict pass
-    passinfo pass;
-    if (!predictor.nextpass(&pass, 20))
+    if (!foundPass)
     {
-        Serial.printf("❌ Prediction failed for %s (CATNR %d)\n", nameBuf, catalogNumber);
+        Serial.printf("❌ Could not find valid pass for CATNR %d after %d attempts\n", catalogNumber, attempts);
         return false;
     }
 
@@ -1185,29 +1198,29 @@ bool predictNextPass(int catalogNumber)
     int tz = tzOffset / 3600;
 
     invjday(pass.jdstart, 0, false, y, m, d, h, min, sec);
-    String aosUTC = formatTimeStamp(d, m, y, h, min,sec);
+    String aosUTC = formatTimeStamp(d, m, y, h, min, sec);
     invjday(pass.jdstart, tz, false, y, m, d, h, min, sec);
-    String aosLocal = formatTimeStamp(d, m, y, h, min,sec);
+    String aosLocal = formatTimeStamp(d, m, y, h, min, sec);
 
     invjday(pass.jdmax, 0, false, y, m, d, h, min, sec);
-    String tcaUTC = formatTimeStamp(d, m, y, h, min,sec);
+    String tcaUTC = formatTimeStamp(d, m, y, h, min, sec);
     invjday(pass.jdmax, tz, false, y, m, d, h, min, sec);
-    String tcaLocal = formatTimeStamp(d, m, y, h, min,sec);
+    String tcaLocal = formatTimeStamp(d, m, y, h, min, sec);
 
     invjday(pass.jdstop, 0, false, y, m, d, h, min, sec);
-    String losUTC = formatTimeStamp(d, m, y, h, min,sec);
+    String losUTC = formatTimeStamp(d, m, y, h, min, sec);
     invjday(pass.jdstop, tz, false, y, m, d, h, min, sec);
-    String losLocal = formatTimeStamp(d, m, y, h, min,sec);
+    String losLocal = formatTimeStamp(d, m, y, h, min, sec);
 
-    // Step 7: Duration calculations
+    // Step 7: Duration and time-to-event
     double durationSec = (pass.jdstop - pass.jdstart) * 86400.0;
-    double nowJD = now / 86400.0 + 2440587.5;
-    double secondsUntilEvent = satCurrentlyVisible
-        ? (pass.jdstop - nowJD) * 86400.0
-        : (pass.jdstart - nowJD) * 86400.0;
+    double secondsUntilEvent = 0;
+    double nowJD = time(nullptr) / 86400.0 + 2440587.5;
 
-    if (secondsUntilEvent < 5)
-        secondsUntilEvent = 0;
+    if (satCurrentlyVisible)
+        secondsUntilEvent = (pass.jdstop - nowJD) * 86400.0;
+    else
+        secondsUntilEvent = (pass.jdstart - nowJD) * 86400.0;
 
     // Step 8: Store results
     TrackedSatInfo[satIndex].currentlyVisible = satCurrentlyVisible;
@@ -1220,25 +1233,8 @@ bool predictNextPass(int catalogNumber)
     TrackedSatInfo[satIndex].azAtAOS = pass.azstart;
     TrackedSatInfo[satIndex].azAtLOS = pass.azstop;
 
-    // Step 9: Optional debug output
-    /*
-    Serial.printf("📡 %s (%d) — %s\n", nameBuf, catalogNumber, satCurrentlyVisible ? "CURRENT PASS" : "NEXT PASS");
-    Serial.printf("AOS : %s local / %s UTC  az=%.1f°\n", aosLocal.c_str(), aosUTC.c_str(), pass.azstart);
-    Serial.printf("TCA : %s local / %s UTC  el=%.1f°\n", tcaLocal.c_str(), tcaUTC.c_str(), pass.maxelevation);
-    Serial.printf("LOS : %s local / %s UTC  az=%.1f°\n", losLocal.c_str(), losUTC.c_str(), pass.azstop);
-    Serial.printf("⏱️  Duration     : %s\n", TrackedSatInfo[satIndex].passDuration.c_str());
-    Serial.printf("⏳ Until %s : %s\n", satCurrentlyVisible ? "LOS" : "AOS", TrackedSatInfo[satIndex].timeToEvent.c_str());
-    */
-    
     return true;
 }
-
-
-
-
-
-
-
 
 /**
  * 🛰️ loadAndTrackSatelliteByCatalogNumber()
@@ -1390,6 +1386,8 @@ void loadAndTrackSatelliteByCatalogNumber(int catalogNumber, bool shouldBroadcas
         info.distance = sat.satDist;
         info.sublat = sat.satLat;
         info.altitude = sat.satAlt;
+        // Set the visibility status based on elevation
+info.currentlyVisible = (sat.satEl > 0);  // Visible if elevation > 0°
 
 info.sublon = sat.satLon;
         info.frequencyMHz = nominalFreqMHz;
@@ -1593,9 +1591,6 @@ void sendFreqToGQRX(float freqMHz) {
     sendCommandToGQRX(cmd.c_str());
 }
 
-
-
-
 void sendDefaultGQRXSettings() {
     sendCommandToGQRX("M FM\n");         // Set mode: FM
     delay(100);
@@ -1604,6 +1599,7 @@ void sendDefaultGQRXSettings() {
     // sendCommandToGQRX("S\n");        // Skip: usually not needed
     Serial.println("✅ GQRX default settings applied.");
 }
+
 void computeFuturePassesForAllSats() {
     Serial.println("🔮 Computing next 10 passes for each satellite...");
 
@@ -1771,6 +1767,9 @@ server.on("/futurepasses", HTTP_GET, [](AsyncWebServerRequest *request) {
     request->send(200, "application/json", json);
 });
 
+server.on("/console.html", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send(SPIFFS, "/console.html", "text/html");
+});
 
 
 
@@ -1944,6 +1943,21 @@ server.on("/current", HTTP_GET, [](AsyncWebServerRequest *request) {
     request->send(200, "application/json", json);
 });
 
+// 🧭 Homing endpoint: parks both azimuth and elevation
+server.on("/homing", HTTP_POST, [](AsyncWebServerRequest *request) {
+    Serial.println("🏁 /homing requested — Starting homing sequence...");
+    request->send(200, "text/plain", "Homing sequence triggered.");
+    trackingEnabled = false;
+    currentTrackingTarget = "";
+    trackedSatIndex = -1;
+    AzimuthForRotator=0;
+    ElevationForRotator=0;
+});
+
+
+
+
+
 
 //#########################################################################################################
 
@@ -1984,8 +1998,8 @@ server.on("/current", HTTP_GET, [](AsyncWebServerRequest *request) {
     aziStepper.setAcceleration(400);
     aziStepper.setCurrentPosition(0);
     // Perform parking and testing sequence
-    // parkAzimuth();
-    // parkElevation();
+    //parkAzimuth();
+    //parkElevation();
     // testParallelMove();
 }
 
@@ -2102,10 +2116,5 @@ void loop()
             }
         }
     }
-
-
-
-
-
 
 }

@@ -30,7 +30,7 @@
                 </div>
             </div>
             <!-- Satellite Table -->
-            <div class="mb-4 table-responsive" data-pg-collapsed>
+            <div class="table-responsive mb-4" data-pg-collapsed>
                 <table class="table table-dark table-bordered align-middle" id="satTable">
                     <thead class="table-light">
                         <tr class="table-dark">
@@ -45,7 +45,7 @@
                             <th>LOS</th>
                             <th>Max El</th>
                             <th>Duration</th>
-                            <th><a href="future.html" target="_parent" class="link-light">Next Event</a></th>
+                            <th>Next Event</th>
                         </tr>
                     </thead>
                     <tbody id="satBody"></tbody>
@@ -56,12 +56,12 @@
                 <div class="col-md-3">
                     <div id="sunChart"></div>
                 </div>
-                <div class="col-md-3">
+                <div class="col-md-3" data-pg-collapsed>
                     <div class="card p-2">
-                        <div class="d-flex align-items-center mb-2">
-                            <input name="trackingTarget" type="radio" value="sun" class="me-2">
-                            <div class="label" style="font-size: 20px; margin-left: 10px;">🌞 Sun</div>
+                        <div class="radio">
+                            <input name="trackingTarget" type="radio" value="sun">
                         </div>
+                        <div class="label" style="font-size: 20px;">🌞 Sun</div>
                         <table class="table table-sm table-borderless text-light">
                             <tr>
                                 <td class="table-dark" style="text-align: left; padding-left: 15px;">Azimuth:</td>
@@ -84,10 +84,10 @@
                 </div>
                 <div class="col-md-3" data-pg-collapsed>
                     <div class="card p-2">
-                        <div class="d-flex align-items-center mb-2">
-                            <input name="trackingTarget" type="radio" value="moon" class="me-2">
-                            <div class="label" style="font-size: 20px; margin-left: 10px;">🌙 Moon</div>
+                        <div class="radio">
+                            <input name="trackingTarget" type="radio" value="moon">
                         </div>
+                        <div class="label" style="font-size: 20px;">🌙 Moon</div>
                         <table class="table table-sm table-borderless text-light">
                             <tr>
                                 <td class="table-dark" style="text-align: left; padding-left: 15px;">Azimuth:</td>
@@ -117,19 +117,8 @@
             <!-- Tracking Banner -->
             <div class="highlight" id="trackingBanner">📡 Currently Tracking:</div>
             <!-- Stop Tracking Section -->
-            <div class=" mt-4 text-center" id="stopTrackingWrapper">
-                <div class="row">
-                    <div class="col-md-3"> 
-</div>
-                    <div class="col-md-3"> 
-                        <button class="btn btn-danger btn-lg mb-3" id="stopTrackingBtn" style="width: 200px;">Stop Tracking</button>
-                    </div>
-                    <div class="col-md-3"> 
-                        <button class="btn btn-lg btn-success mb-3" id="parkBtn" style="width: 200px;">Park</button>
-                    </div>
-                    <div class="col-md-3"> 
-</div>
-                </div>
+            <div class="hidden mt-4 text-center" id="stopTrackingWrapper">
+                <button class="btn btn-danger btn-lg mb-3" id="stopTrackingBtn">Stop Tracking</button>
                 <div class="row">
                     <div class="col-md-6 d-flex justify-content-center">
                         <div id="map"></div>
@@ -151,7 +140,7 @@
                     Rotor Position — Azimuth: <span id="rotorAz">--</span>°, Elevation: <span id="rotorEl">--</span>°
                 </div>
             </div>
-            <div class="row" style="margin-top: 20px;">
+            <div class="row">
                 <div class="col-md-12">
                     <div class="d-flex justify-content-center">
                         <div id="footprintmap" style="width: 1024px; height: 512px;"></div>
@@ -161,8 +150,8 @@
         </div>
         <!-- Scripts remain below -->
         <script>
-    var latitude = 0;
-    var longitude = 0;
+    var latitude = 46.4668;
+    var longitude = 6.8616;
 
 
     let selectedTarget = null;
@@ -276,21 +265,6 @@
         selectedTarget = null;
         document.querySelectorAll('input[name="trackingTarget"]').forEach(r => r.checked = false);
         fetch("/track", {
-            method: "POST",
-            headers: {"Content-Type": "application/json"},
-            body: JSON.stringify({target: ""})
-        }).then(res => {
-            if (res.ok) {
-                banner.innerHTML = "📡 Currently Tracking: --";
-                stopWrapper.classList.add("hidden");
-
-            }
-        });
-    });
-    document.getElementById("parkBtn").addEventListener("click", () => {
-        selectedTarget = null;
-        document.querySelectorAll('input[name="trackingTarget"]').forEach(r => r.checked = false);
-        fetch("/homing", {
             method: "POST",
             headers: {"Content-Type": "application/json"},
             body: JSON.stringify({target: ""})
@@ -465,9 +439,8 @@ Time until sunset: <b>${h}h ${m}m</b>
                             fontSize: '24px'
                         },
                         align: 'center',
-                        //verticalAlign: 'middle',
-                        //y: 12,
-                        //x: -12
+                        verticalAlign: 'middle',
+                        y: 0
                     }
                 },
                 {
@@ -924,9 +897,15 @@ Time until sunset: <b>${h}h ${m}m</b>
             });
     }
 
-    window.onload = function () {
 
-        // Then fetch observer location
+    window.onload = function () {
+        // Initial triggers
+        loadSatelliteData()
+        buildSunChart();
+        loadSunMoonData();
+
+        updateClocks();
+
         fetch('/observer')
             .then(response => response.json())
             .then(data => {
@@ -937,32 +916,8 @@ Time until sunset: <b>${h}h ${m}m</b>
                 console.log("Observer Latitude:", latitude);
                 console.log("Observer Longitude:", longitude);
                 console.log("Google Maps API Key:", mapsApiKey);
-                buildSunChart();
-                // ✅ Draw home circle on Leaflet footprint map
-                const homeCircle = L.circle([latitude, longitude], {
-                    color: '#00aaff',
-                    fillColor: '#00aaff',
-                    fillOpacity: 0.3,
-                    radius: 100000  // 100 km
-                }).addTo(footprintmap);
 
-                const homeMarker = L.circleMarker([latitude, longitude], {
-                    radius: 5,
-                    color: '#ffffff',
-                    fillColor: '#00aaff',
-                    fillOpacity: 1
-                }).addTo(footprintmap);
-
-                const homeLabel = L.marker([latitude, longitude], {
-                    icon: L.divIcon({
-                        className: 'sat-label',
-                        html: 'Home',
-                        iconSize: [70, 20],
-                        iconAnchor: [35, 25]
-                    })
-                }).addTo(footprintmap);
-
-                // ✅ Dynamically load Google Maps script and trigger initMap()
+                // Now that you have the key, dynamically load the Google Maps API
                 const script = document.createElement('script');
                 script.src = `https://maps.googleapis.com/maps/api/js?key=${mapsApiKey}&callback=initMap`;
                 script.async = true;
@@ -970,25 +925,10 @@ Time until sunset: <b>${h}h ${m}m</b>
                 document.head.appendChild(script);
             })
             .catch(error => console.error('Error fetching observer data:', error));
-        // Call functions that do NOT depend on observer location
-        loadSatelliteData();
-
-        loadSunMoonData();
-        updateClocks();
-
-
     };
 
-
-
     setInterval(() => {
         loadSunMoonData();
-    }, 10000);
-
-
-
-
-    setInterval(() => {
         loadSatelliteData();
         updateClocks();
     }, 1000);
@@ -1115,7 +1055,7 @@ Time until sunset: <b>${h}h ${m}m</b>
     }
 
     updateSatellitesForFootprintMap(); // Initial call
-    setInterval(updateSatellitesForFootprintMap, 15000); // Refresh every 5 seconds
+    setInterval(updateSatellitesForFootprintMap, 5000); // Refresh every 5 seconds
 </script>
     </body>
 </html>
